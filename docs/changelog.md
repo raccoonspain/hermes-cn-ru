@@ -21,6 +21,20 @@
 
 <!-- Новые записи добавляй СВЕРХУ, сразу под этой строкой -->
 
+## 2026-07-24 — Matrix-шлюз подключён
+- Заказчик прислал homeserver (`matrix.ctvuprising.ru`), access token
+  аккаунта `@hermes` и список из двух разрешённых Matrix ID (заказчик +
+  сын, который будет учиться через Блок знаний).
+- Поставили Python-пакет `mautrix` (extra `matrix`) на сервере под `hermes`.
+- Прописали `MATRIX_HOMESERVER`/`MATRIX_ACCESS_TOKEN`/`MATRIX_ALLOWED_USERS`
+  в `~/.hermes/.env` (только на сервере, не в git).
+- Проверили токен через `whoami`, затем тестовым запуском шлюза — лог
+  показал `✓ matrix connected`, залогинились как `@hermes:...`.
+- Решение и обоснование (access token вместо пароля, без room-allowlist
+  для DM-сценария) — D-005 в `docs/decisions.md`.
+- Постоянно (systemd) шлюз не поднимали — без модели агент не сможет
+  отвечать; сделаем один раз вместе с провайдером моделей.
+- Связанные решения: D-005
 ## 2026-07-24 — Полная документация API wormsoft.ru
 - Заказчик прислал скриншотами все страницы `/docs/llm/*` (auth, Responses
   API, Chat Completions API, Embeddings API, Models API, полная таблица из

@@ -6,7 +6,7 @@
 > Обновляй после каждого осмысленного шага и **коммить**.
 
 **Последнее обновление:** 2026-07-24
-**Фаза:** Hermes установлен и работает в «клетке», модели/мессенджер ещё не подключены
+**Фаза:** Hermes установлен и в «клетке», Matrix подключён и проверен, модели ещё не подключены
 
 ---
 
@@ -18,8 +18,12 @@ sudo, свой ключ). Hermes CLI 0.19.0 установлен на серве
 с лимитами ресурсов, approvals в режиме manual + свои deny-правила,
 tirith-сканер, write-safe-root, Python-плагин content-injection-guard
 против prompt injection из веб-контента/картинок, правило в SOUL.md.
-`hermes doctor` подтверждает валидность конфига. Агент пока нерабочий по
-сути — не подключены ни модели (нужен ключ wormsoft.ru), ни Matrix.
+Matrix-шлюз настроен и проверен (D-005): подключение к домашнему серверу
+заказчика (`matrix.ctvuprising.ru`) под `@hermes`, access token в `.env`,
+allowlist на 2 человек (заказчик + сын). Тестовый запуск дал `✓ matrix
+connected`. Постоянно (systemd) шлюз пока не запускали — ждём модель.
+Единственное, чего не хватает агенту, чтобы реально отвечать — провайдер
+моделей (нужен ключ wormsoft.ru, см. D-001).
 
 ## Сейчас в работе
 
@@ -30,16 +34,18 @@ tirith-сканер, write-safe-root, Python-плагин content-injection-guar
 - [x] Согласовать и реализовать архитектуру sandbox/permissions против prompt injection (D-004)
 - [x] Установить Docker на VPS, добавить `hermes` в группу `docker`
 - [x] Установить Hermes (terminal.backend docker)
+- [x] Подключить Matrix gateway, проверить подключение (D-005)
 - [ ] Получить API-ключ wormsoft.ru и прописать роутинг моделей в config.yaml (см. D-001)
-- [ ] Подключить Matrix gateway (нужны от заказчика: homeserver URL, access token бота, whitelist пользователей/комнат)
+- [ ] Поднять `hermes gateway` постоянно (systemd) — как только будет модель; пригласить бота в личку в Element и проверить сквозной диалог
 - [ ] Подключить Perplexity/web-поиск, проверить вариант интеграции
 - [ ] Кастомный DXF-скилл (нет готового в каталоге Hermes)
 - [ ] Доустановить browser-tools (npm install не прошёл при установке под root — нужно перезапустить `npm install` от `hermes` в `~/.hermes/hermes-agent`)
 - [ ] Решить, мигрировать ли config.yaml через `hermes doctor --fix` (v0 → v33) — осторожно, `hermes config set`/миграция могут вычищать комментарии, проверять на копии
+- [ ] Опционально: включить E2EE для Matrix (нужен `libolm-dev` системно под root; `python-olm` уже стоит) — не запрошено, отложено
 
 ## Открытые вопросы / блокеры
 
-- Нужны от заказчика: API-ключ wormsoft.ru; данные Matrix homeserver (URL, как завести бота/access token)
+- Нужен от заказчика: API-ключ wormsoft.ru (единственный оставшийся блокер, чтобы агент реально заработал)
 
 ## Карта проекта (опорные точки)
 
@@ -60,6 +66,12 @@ tirith-сканер, write-safe-root, Python-плагин content-injection-guar
 в git не попадают (см. `.gitignore` и правило в `CLAUDE.md`). Паролей от
 серверных аккаунтов в текстовом виде нигде нет — если понадобится реальный
 пароль (например, для `deploy`), хранить в менеджере паролей, а не в репо.
+
+### Matrix
+- Homeserver: `https://matrix.ctvuprising.ru` (домашний сервер заказчика)
+- Аккаунт бота: `@hermes:matrix.ctvuprising.ru`, доступ по access token (D-005)
+- Allowlist (`MATRIX_ALLOWED_USERS`): `@dem:matrix.ctvuprising.ru` (заказчик), `@glapetram:matrix.ctvuprising.ru` (сын)
+- Токен и всё остальное — только в `~/.hermes/.env` на сервере, не в репозитории
 
 ### Hermes на сервере
 - Установлен под `hermes`: `~/.hermes/` (config.yaml, .env, SOUL.md), код — `~/.hermes/hermes-agent/`
