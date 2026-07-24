@@ -319,6 +319,15 @@ Allowlist (`MATRIX_ALLOWED_USERS`): `@dem:matrix.ctvuprising.ru` (сам
 шлюза откладываем до подключения провайдера моделей (D-001) — иначе бот
 подключится, но не сможет отвечать.
 
+**Запущено насовсем (2026-07-24).** После подключения модели (D-001) и
+веб-поиска (D-006) подняли шлюз как **пользовательский** systemd-сервис:
+`hermes gateway install --start-now --start-on-login` (без `--system` —
+root не требуется, `hermes` без sudo по D-003). Отдельно потребовался
+`loginctl enable-linger hermes`, чтобы сервис пережил разлогин SSH — команда
+выполнилась и от непривилегированного пользователя, root не понадобился.
+`hermes gateway status` подтверждает: `active (running)`, linger включён.
+Логи показывают чистый `✓ matrix connected`.
+
 ---
 
 ## D-006 · Веб-поиск: ddgs как backend инструмента, Perplexity — отдельно как модель
