@@ -74,6 +74,37 @@
 Если в первые недели эксплуатации упрёмся в лимиты — сначала пересматривать
 роутинг (эскалацию на дорогие модели), и только потом — тариф подписки.
 
+**Реализовано (2026-07-24).** Подключили провайдера и роутинг в
+`config.yaml`/`.env`:
+- `model:` — `provider: custom`, `base_url: https://ai.wormsoft.ru/api/gpt`,
+  `default: wormsoft/agent/high` (conductor).
+- `auxiliary.vision/web_extract/compression` — `provider: "main"` (наследует
+  base_url/ключ главной модели) с моделями `wormsoft/vision/low`,
+  `wormsoft/agent/low`, `openai/gpt-oss:20b` соответственно.
+- `delegation.model: wormsoft/agent/low` (worker для сабагентов),
+  `delegation.max_concurrent_children: 2` — сознательно низко (см.
+  уточнение про rate limit выше).
+- Роли «code» и «critic» из исходного плана **не реализованы как отдельные
+  конфиг-слоты** — в Hermes нет для них выделенного механизма (только
+  `model:`, `auxiliary.*`, `delegation.*`). «Code» — это просто основная
+  модель (у неё и так `tools, reasoning`) либо ручной `/model
+  wormsoft/code/high` на время сессии. «Critic» — вручную попросить агента
+  переключиться на другую модель и перепроверить, либо через
+  `delegate_task` с явным override модели; не автоматизировано.
+
+**Важная находка (кусалась при первом подключении).** Hermes резолвит API-
+ключ для custom-эндпоинтов **по хосту**, не по общей `OPENAI_API_KEY`
+(см. `_host_derived_api_key` в `hermes_cli/runtime_provider.py`,
+issue #28660 / GHSA-76xc-57q6-vm5m — защита от утечки ключа одного
+провайдера на чужой custom-хост). `OPENAI_API_KEY` подхватывается ТОЛЬКО
+для base_url на `openai.com`/`openai.azure.com`. Для произвольного хоста
+Hermes ищёт `<VENDOR>_API_KEY`, где `VENDOR` — предпоследний label домена
+(для `ai.wormsoft.ru` → `WORMSOFT_API_KEY`). Первая попытка с
+`OPENAI_API_KEY` в `.env` дала `HTTP 401: Unauthorized`, хотя ключ
+прекрасно работал при прямом curl-запросе — переименование переменной в
+`WORMSOFT_API_KEY` сразу всё починило. Проверено: `hermes -z "..."` на
+`wormsoft/agent/high` и на `wormsoft/agent/low` — оба отвечают.
+
 **Уточнение (2026-07-24), по официальной документации wormsoft.ru.**
 Подробности API, полная таблица из 24 моделей и то, как реально устроены
 `wormsoft/*`-алиасы — в `docs/wormsoft-api.md`. Два момента важны для этого

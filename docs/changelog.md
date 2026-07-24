@@ -21,6 +21,24 @@
 
 <!-- Новые записи добавляй СВЕРХУ, сразу под этой строкой -->
 
+## 2026-07-24 — Провайдер моделей wormsoft.ru подключён
+- Заказчик прислал API-ключ и URL (`https://ai.wormsoft.ru/api/gpt`).
+- Прописали `model:` (custom provider, conductor = `wormsoft/agent/high`),
+  `auxiliary.vision/web_extract/compression` и `delegation.model` (worker)
+  в `config.yaml` по плану D-001.
+- Наступили на грабли: `OPENAI_API_KEY` в `.env` дал `HTTP 401` — оказалось,
+  Hermes резолвит ключ для custom-эндпоинтов по домену хоста
+  (`_host_derived_api_key`), а не по общей `OPENAI_API_KEY` (та работает
+  только для openai.com — защита от утечки ключа между провайдерами).
+  Переименовали в `WORMSOFT_API_KEY` — заработало сразу.
+- Проверили `hermes -z "..."` на `wormsoft/agent/high` и `wormsoft/agent/low`
+  — оба тира отвечают. `hermes doctor` подтверждает конфигурацию.
+- «Code» и «critic» роли из исходного плана D-001 оказались не отдельными
+  конфиг-слотами в Hermes — задокументировали, как их использовать на
+  практике (ручной `/model`, `delegate_task` с override).
+- Matrix (D-005) и модель (D-001) проверены по отдельности; постоянный
+  запуск шлюза вместе — следующий шаг.
+- Связанные решения: D-001 (реализация + находка про ключ)
 ## 2026-07-24 — Matrix-шлюз подключён
 - Заказчик прислал homeserver (`matrix.ctvuprising.ru`), access token
   аккаунта `@hermes` и список из двух разрешённых Matrix ID (заказчик +
