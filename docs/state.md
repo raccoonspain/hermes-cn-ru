@@ -110,7 +110,7 @@ provider» (это wormsoft.ru временно тормозит, не наш б
 - [x] Доустановить browser-tools (`npm install` под `hermes` с верным PATH) — агент теперь реально заходит на страницы через `browser_navigate`
 - [x] ~~Perplexity~~ — не понадобилась: поиск (`ddgs`) + browser-tools закрывают задачу «искать и заходить на любую страницу» бесплатно (D-006 доп.)
 - [ ] Кастомный DXF-скилл (нет готового в каталоге Hermes)
-- [ ] Настроить явный host-visible output mount для Docker terminal backend, чтобы файлы агента сразу были видны в дашборде/доставлялись в чат (сейчас — вручную копировать, см. changelog и manual.md)
+- [x] Host-visible output mount для Docker terminal backend настроен (`/output` → `~/.hermes/cache/documents`, через `.env`, т.к. `config.yaml docker_volumes` не бриджится на нашей версии схемы) — файлы из песочницы теперь можно доставлять в чат, см. D-004 и manual.md
 - [ ] Решить, мигрировать ли config.yaml через `hermes doctor --fix` (v0 → v33) — осторожно, `hermes config set`/миграция могут вычищать комментарии, проверять на копии
 - [ ] Опционально: включить E2EE для Matrix (нужен `libolm-dev` системно под root; `python-olm` уже стоит) — не запрошено, отложено
 
