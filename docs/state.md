@@ -69,7 +69,8 @@ tirith-сканер, write-safe-root, Python-плагин content-injection-guar
 
 ### Документы
 - Бриф: [project-brief.md](./project-brief.md)
-- Решения: [decisions.md](./decisions.md) (D-001 роутинг моделей, D-002 VPS, D-003 аккаунт hermes)
+- Решения: [decisions.md](./decisions.md) (D-001 роутинг моделей, D-002 VPS, D-003 аккаунт hermes, D-004 клетка)
+- Справочник по API wormsoft.ru (матрица ошибок, лимиты): [wormsoft-api.md](./wormsoft-api.md)
 - Сырые материалы: `source/1st brief.md`, `source/Futura AI/`
 
 
