@@ -1,0 +1,22 @@
+# Hermes Agent -- Docker Compose
+# 1. Скопируй этот файл на сервер
+# 2. Заполни .env (шаблон рядом)
+# 3. docker compose up -d
+# 4. docker compose exec hermes hermes setup
+
+services:
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    restart: unless-stopped
+    command: gateway run
+    ports:
+      - "8642:8642"   # OpenAI-compatible API
+      - "9119:9119"   # Web Dashboard
+    volumes:
+      - ~/.hermes:/opt/data
+    environment:
+      - HERMES_DASHBOARD=1
+    deploy:
+      resources:
+        limits:
+          memory: 4G

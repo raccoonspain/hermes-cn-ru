@@ -1,0 +1,92 @@
+# ═══════════════════════════════════════════
+# Hermes Agent -- hooks.yaml шаблон
+# Положи рядом с агентом (~/.hermes/hooks.yaml)
+# Хуки -- скрипты-охранники: проверяют каждое
+# действие агента ДО выполнения
+# ═══════════════════════════════════════════
+
+hooks:
+
+  # ─── Перед действием с инструментом ───
+  # Блокирует опасные команды до их выполнения
+  pre_tool_call:
+
+    # Хук 1: блокировка rm за пределами рабочей папки
+    - command: "python3 hooks/block-rm.py"
+      matcher: "bash"
+      timeout: 30
+
+    # Хук 2: защита критичных файлов (.env, память, конфиг)
+    - command: "python3 hooks/protect-files.py"
+      matcher: "bash|file_write"
+      timeout: 30
+
+  # ─── После действия с инструментом ───
+  # Логирование, проверка результата
+  post_tool_call:
+
+    # Хук 3: запись всех изменений файлов в лог
+    - command: "python3 hooks/audit-log.py"
+      matcher: "file_write|bash"
+      timeout: 10
+
+  # ─── Перед обращением к AI-модели ───
+  # Подкидывает свежие данные в контекст
+  pre_llm_call:
+
+    # Хук 4: инжекция актуального состояния системы
+    - command: "bash hooks/inject-context.sh"
+
+
+# ═══════════════════════════════════════════
+# СКРИПТЫ ХУКОВ
+# Создай папку hooks/ рядом с hooks.yaml
+# и положи туда эти файлы
+# ═══════════════════════════════════════════
+
+# --- hooks/block-rm.py ---
+# Блокирует rm -rf за пределами рабочей папки
+#
+# import sys, json
+# data = json.load(sys.stdin)
+# cmd = data.get('tool_input', {}).get('command', '')
+# if 'rm -rf' in cmd and '/workspace' not in cmd and '/tmp' not in cmd:
+#     print(json.dumps({
+#         'decision': 'block',
+#         'reason': 'rm -rf вне рабочей папки запрещён'
+#     }))
+
+# --- hooks/protect-files.py ---
+# Блокирует запись в .env, конфиг и файлы памяти
+#
+# import sys, json
+# data = json.load(sys.stdin)
+# cmd = data.get('tool_input', {}).get('command', '')
+# protected = ['.env', 'config.yaml', 'agent-memory.md', 'SOUL.md']
+# for f in protected:
+#     if f in cmd and 'cat' not in cmd and 'grep' not in cmd:
+#         print(json.dumps({
+#             'decision': 'block',
+#             'reason': f'Изменение {f} заблокировано хуком'
+#         }))
+#         break
+
+# --- hooks/audit-log.py ---
+# Записывает все изменения файлов в лог
+#
+# import sys, json, datetime
+# data = json.load(sys.stdin)
+# tool = data.get('tool_name', '')
+# cmd = data.get('tool_input', {}).get('command', '')
+# ts = datetime.datetime.now().isoformat()
+# with open('hooks/audit.log', 'a') as f:
+#     f.write(f'{ts} | {tool} | {cmd[:200]}\n')
+
+# --- hooks/inject-context.sh ---
+# Подкидывает актуальное состояние системы перед каждым запросом к модели
+#
+# #!/bin/bash
+# DISK=$(df -h / | awk 'NR==2{print $5}')
+# MEM=$(free -m 2>/dev/null | awk 'NR==2{printf "%.0f%%", $3/$2*100}' || echo "N/A")
+# DATE=$(date '+%Y-%m-%d %H:%M')
+# echo "{\"context\": \"Сейчас $DATE. Диск: $DISK. Память: $MEM.\"}"

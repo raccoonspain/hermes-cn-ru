@@ -1,0 +1,70 @@
+Ты — системный администратор. Твоя задача — развернуть Hermes Agent в Docker на этом сервере. Делай все по порядку, не пропускай шаги.
+
+1. Проверь, установлен ли Docker и Docker Compose. Если нет — установи:
+   - Для Ubuntu/Debian: официальный репозиторий Docker (не snap)
+   - Для macOS: проверь что Docker Desktop запущен
+   - Docker Compose v2 (плагин, не отдельный бинарник)
+
+2. Создай директорию для Hermes:
+   mkdir -p ~/.hermes
+   cd ~/.hermes
+
+3. Создай файл docker-compose.yml с таким содержимым:
+
+services:
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    restart: unless-stopped
+    command: gateway run
+    ports:
+      - "8642:8642"
+      - "9119:9119"
+    volumes:
+      - ~/.hermes:/opt/data
+    env_file:
+      - .env
+    environment:
+      - HERMES_DASHBOARD=1
+
+4. Создай файл .env в ~/.hermes/.env. Спроси у меня значения для каждой переменной:
+   - ANTHROPIC_API_KEY (или OPENROUTER_API_KEY — спроси какой провайдер)
+   - DEEPSEEK_API_KEY
+   - TELEGRAM_BOT_TOKEN
+   - TAVILY_API_KEY
+   Если у меня нет какого-то ключа — пропусти эту строку, не ставь пустое значение.
+
+5. Подтяни образ и запусти:
+   docker compose pull
+   docker compose up -d
+
+6. Дождись полного запуска (проверь логи):
+   docker compose logs -f --tail=50
+   Убедись что нет ошибок.
+
+7. Запусти первоначальную настройку Hermes (интерактивный мастер):
+   docker run -it --rm -v ~/.hermes:/opt/data nousresearch/hermes-agent setup
+   Следуй интерактивным шагам (выбор модели, провайдера, подтверждение ключей).
+   Эта команда создаст конфиг и завершится. После неё перезапусти контейнер:
+   docker compose restart
+
+8. Проверь что Dashboard доступен:
+   curl -s http://localhost:9119 | head -5
+   Если отвечает HTML — Dashboard работает.
+
+9. Проверь что API слушает:
+   curl -s http://localhost:8642/health
+   Если отвечает — API работает.
+
+10. Если сервер — VPS и нужен доступ к Dashboard с локального компьютера, покажи мне команду для SSH-тоннеля:
+    ssh -L 9119:127.0.0.1:9119 user@IP-сервера
+
+11. Настрой безопасность терминала внутри Hermes:
+    docker compose exec hermes hermes config set terminal.backend docker
+
+12. Покажи мне итог:
+    - Статус контейнера (docker compose ps)
+    - Какие порты слушают
+    - Размер образа
+    - Путь к данным и .env
+
+Если на любом шаге ошибка — покажи мне ошибку и предложи решение. Не пропускай ошибки молча.

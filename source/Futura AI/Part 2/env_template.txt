@@ -1,0 +1,20 @@
+# ═══════════════════════════════════════════
+# Hermes Agent -- .env шаблон
+# Скопируй как ~/.hermes/.env и заполни
+# ═══════════════════════════════════════════
+
+# ─── Провайдер моделей (выбери один) ───
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxx
+
+# ─── Telegram ───
+TELEGRAM_BOT_TOKEN=7123456789:AAF-xxxxxxxx
+TELEGRAM_ALLOWED_IDS=123456789
+
+# ─── Веб-поиск (рекомендую Tavily -- бесплатный тир) ───
+TAVILY_API_KEY=tvly-xxxxxxxx
+
+# ─── GitHub бекап (опционально) ───
+GITHUB_TOKEN=ghp_xxxxxxxx
+
+# ─── SuperGrok (опционально, если есть подписка) ───
+# Настраивается через: hermes auth add xai-oauth
