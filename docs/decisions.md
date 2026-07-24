@@ -328,6 +328,22 @@ root не требуется, `hermes` без sudo по D-003). Отдельно
 `hermes gateway status` подтверждает: `active (running)`, linger включён.
 Логи показывают чистый `✓ matrix connected`.
 
+**Найдено и починено (2026-07-24) — все ответы сыпались в одну ленту.**
+Заказчик пожаловался: несколько параллельных задач в «Hermes room»
+не расходятся по веткам (Matrix threads), всё идёт плоским потоком —
+хотя по докам Hermes `MATRIX_AUTO_THREAD=true` включён по умолчанию.
+Причина нашлась в исходниках (`plugins/platforms/matrix/adapter.py`):
+у авто-веток на самом деле ДВА независимых флага — `MATRIX_AUTO_THREAD`
+(default `true`, для обычных групповых комнат) и **`MATRIX_DM_AUTO_THREAD`
+(default `false`)** — для комнат, которые Hermes сам относит к DM через
+свой `m.direct`-учёт (`_record_dm_room`), независимо от того, как комнату
+создавали в Element (`is_direct` при инвайте тут не главное). «Hermes room»
+— комната 1-на-1 с ботом, поэтому Hermes завёл её как DM в своём
+`m.direct`, и действовал флаг `MATRIX_DM_AUTO_THREAD=false`, который мы
+никогда не выставляли явно. Добавили `MATRIX_DM_AUTO_THREAD=true` в `.env`,
+перезапустили `hermes-gateway.service` — теперь и в DM-подобных комнатах
+каждое новое сообщение получит свою ветку.
+
 ---
 
 ## D-006 · Веб-поиск: ddgs как backend инструмента, Perplexity — отдельно как модель
