@@ -112,7 +112,14 @@ provider» (это wormsoft.ru временно тормозит, не наш б
 ## Следующие шаги
 
 - [x] **Архитектура памяти/файлов сессий Hermes — дизайн готов (2026-07-25).**
-  Полный дизайн: [hermes-prj-structure.md](./hermes-prj-structure.md).
+  Полный дизайн + техническая часть embeddings-индекса (2026-07-25, доп.):
+  [hermes-prj-structure.md](./hermes-prj-structure.md) — новый плагин
+  по образцу `content-injection-guard` (`ctx.register_tool`), SQLite +
+  brute-force cosine (не `sqlite-vec`, не внешняя vector DB), модель
+  `qwen/qwen3-embedding:8b` (D-001). Плюс перенос проекта между `ALL`/
+  группами (`project_move`, тот же плагин — единая точка логики для
+  агента и будущего веб-бэкенда, дата-префикс `ALL` туда/обратно,
+  пересчёт индекса всегда). Реализация (сам плагин) не начата.
   Сверились с официальной документацией Hermes — `project_create`/
   `project_list`/`project_switch` не существуют (это фича Desktop-сайдбара
   про git-репозитории, не про темы), встроенные `memory`/`session_search`
