@@ -110,16 +110,29 @@ HTML, без бэкенда): `/result/login.html`, `home.html`,
 `project-selector.html`, `project-workspace.html`, `admin.html` (+ 4
 черновых направления и `index.html` для истории).
 
-**Следующий шаг — бэкенд.** Заказчик планирует сжать контекст (compact)
-и начать реализацию в новой сессии/окне. Что нужно поднять: модель
-данных Групп/Проектов (per-user, emoji, pinned, `about.md`-поля, tags,
-status), Hermes-плагин с `project_move`/`project_index_update`/
-`project_search_similar` (embeddings через `qwen/qwen3-embedding:8b`,
-см. `hermes-prj-structure.md`), сам веб-сервер (HTTPS, собственный домен,
-аутентификация без перечисления логинов), хранение переписки (в макете
-предполагалась SQL-таблица), интеграция с метриками VPS/wormsoft.ru для
-админ-панели. Обновление Hermes (v0.19→latest) и per-user Matrix — по-
-прежнему отдельные, не начатые пункты ниже.
+**Бэкенд разбит на три под-проекта** (см. «Следующие шаги»): **A.**
+Hermes-плагин `project_index` (embeddings-индекс + `project_move`) →
+**B.** веб-бэкенд/API (данные Групп/Проектов, авторизация, чат) → **C.**
+метрики VPS/wormsoft.ru для админ-панели. Обновление Hermes (v0.19→latest)
+и per-user Matrix — по-прежнему отдельные, не начатые пункты ниже.
+
+**Под-проект A — статус: спек и план готовы, реализация не начата.**
+Разведка на реальном сервере (подключились по SSH, свежая сверка кода
+`hermes_cli/plugins.py`/`tools/registry.py`) вскрыла три расхождения с
+исходным `hermes-prj-structure.md`: `numpy` на сервере не установлен
+(решили — чистый Python, без него), у Hermes нет способа вызвать
+инструмент напрямую в обход LLM (решили — логика в обычном импортируемом
+`core.py`, регистрация тонким слоем сверху), хендлер инструмента не знает
+платформенного пользователя автоматически (решили — явный параметр
+`user` в схеме). Сын получает логин `rost` (Ростислав), не `gleb` — везде
+далее использовать `rost`.
+- Спек: [superpowers/specs/2026-07-25-project-index-plugin-design.md](./superpowers/specs/2026-07-25-project-index-plugin-design.md)
+- План реализации (6 задач, TDD, с точным кодом на каждый файл):
+  [superpowers/plans/2026-07-25-project-index-plugin.md](./superpowers/plans/2026-07-25-project-index-plugin.md)
+- **Продолжить с:** Task 0 плана (локальный venv для тестов) → Task 1
+  (`storage.py`) → ... → Task 6 (деплой на VPS, `hermes plugins enable`,
+  правило в `SOUL.md`, миграция `physics-tasks`, приёмочный тест).
+  Ничего из плана ещё не выполнено.
 
 ## Следующие шаги
 
