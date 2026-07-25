@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Картотека — dem</title>
+<style>
+  :root{
+    --paper:#e8e1c9;
+    --paper-deep:#ddd4b6;
+    --ink:#2b2417;
+    --ink-soft:#5a5240;
+    --rule:#b8ac8a;
+    --stamp-green:#3c6e58;
+    --stamp-red:#a13a2a;
+    --card:#f1ecd9;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--paper);
+    background-image:
+      radial-gradient(rgba(0,0,0,.035) 1px, transparent 1px);
+    background-size:3px 3px;
+    color:var(--ink);
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    padding:48px 24px 96px;
+  }
+  .wrap{max-width:980px;margin:0 auto}
+
+  header{
+    border-bottom:2px solid var(--ink);
+    padding-bottom:18px;
+    margin-bottom:36px;
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    gap:12px;
+  }
+  header h1{
+    margin:0;
+    font-size:34px;
+    font-weight:700;
+    letter-spacing:.5px;
+  }
+  header h1 small{
+    display:block;
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:12px;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    margin-bottom:6px;
+  }
+  .header-meta{
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:12px;
+    color:var(--ink-soft);
+    text-align:right;
+    line-height:1.6;
+  }
+
+  .search-strip{
+    display:flex;
+    gap:10px;
+    margin-bottom:34px;
+  }
+  .search-strip input{
+    flex:1;
+    background:var(--card);
+    border:1px solid var(--rule);
+    padding:10px 14px;
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:13px;
+    color:var(--ink);
+  }
+  .search-strip button{
+    background:var(--ink);
+    color:var(--paper);
+    border:none;
+    padding:10px 18px;
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:12px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    cursor:pointer;
+  }
+
+  details.drawer{
+    margin-bottom:14px;
+    border:1px solid var(--rule);
+    background:var(--paper-deep);
+  }
+  details.drawer > summary{
+    list-style:none;
+    cursor:pointer;
+    padding:14px 20px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:13px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    position:relative;
+  }
+  details.drawer > summary::-webkit-details-marker{display:none}
+  details.drawer > summary::before{
+    content:"▸";
+    font-family:serif;
+    font-size:15px;
+    transition:transform .15s ease;
+  }
+  details.drawer[open] > summary::before{transform:rotate(90deg)}
+  .tab-name{
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    text-transform:none;
+    font-size:19px;
+    letter-spacing:0;
+    font-weight:700;
+    flex:1;
+  }
+  .tab-count{color:var(--ink-soft)}
+
+  .cards{
+    padding:22px;
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+    gap:18px;
+    background:var(--paper);
+    border-top:1px dashed var(--rule);
+  }
+
+  .card{
+    background:var(--card);
+    border:1px solid var(--rule);
+    padding:18px 18px 16px;
+    position:relative;
+    box-shadow:2px 3px 0 rgba(43,36,23,.08);
+  }
+  .card::before{
+    content:"";
+    position:absolute;
+    left:0;right:0;top:44px;
+    border-top:1px dashed var(--rule);
+  }
+  .card-title{
+    font-size:17px;
+    font-weight:700;
+    margin:0 0 2px;
+    padding-right:70px;
+    line-height:1.25;
+  }
+  .card-desc{
+    font-size:13.5px;
+    color:var(--ink-soft);
+    margin:14px 0 12px;
+    line-height:1.5;
+  }
+  .stamp{
+    position:absolute;
+    top:14px; right:14px;
+    border:2px solid var(--stamp-green);
+    color:var(--stamp-green);
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:9.5px;
+    letter-spacing:1px;
+    padding:3px 7px;
+    transform:rotate(-8deg);
+    border-radius:3px;
+    opacity:.85;
+  }
+  .stamp.archived{border-color:var(--stamp-red);color:var(--stamp-red)}
+
+  .now{
+    font-size:12.5px;
+    border-left:2px solid var(--ink-soft);
+    padding-left:10px;
+    color:var(--ink);
+    margin-bottom:12px;
+  }
+  .now b{
+    display:block;
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:9.5px;
+    letter-spacing:1.5px;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    margin-bottom:3px;
+    font-weight:400;
+  }
+
+  .tags{display:flex;flex-wrap:wrap;gap:6px}
+  .tag{
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:10.5px;
+    color:var(--ink-soft);
+    border:1px solid var(--rule);
+    padding:2px 7px;
+    background:var(--paper);
+  }
+
+  footer{
+    margin-top:40px;
+    text-align:center;
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    letter-spacing:1px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1><small>Hermes · Личный архив</small>Картотека проектов</h1>
+    <div class="header-meta">
+      workspace: <b>dem</b><br>
+      4 группы · 8 карточек
+    </div>
+  </header>
+
+  <div class="search-strip">
+    <input type="text" placeholder="Найти похожую тему… (embeddings-поиск по запросу)" disabled>
+    <button>Искать</button>
+  </div>
+
+  <details class="drawer" open>
+    <summary><span class="tab-name">ALL — неразобранное</span><span class="tab-count">2 карточки</span></summary>
+    <div class="cards">
+      <div class="card">
+        <div class="stamp">актив</div>
+        <p class="card-title">2026-07-18_счётчики-воды</p>
+        <p class="card-desc">Разобраться, как передать показания счётчиков воды через приложение УК.</p>
+        <div class="now"><b>На чём остановились</b>Прислал скриншот формы — агент разобрал, но нужен логин от личного кабинета, ждём.</div>
+        <div class="tags"></div>
+      </div>
+      <div class="card">
+        <div class="stamp archived">архив</div>
+        <p class="card-title">2026-07-10_рецепт-плова</p>
+        <p class="card-desc">Адаптировать рецепт плова из видео под казан на 8 литров.</p>
+        <div class="now"><b>На чём остановились</b>Готовый пересчитанный рецепт отправлен файлом.</div>
+        <div class="tags"></div>
+      </div>
+    </div>
+  </details>
+
+  <details class="drawer" open>
+    <summary><span class="tab-name">IT / DevOps</span><span class="tab-count">3 карточки</span></summary>
+    <div class="cards">
+      <div class="card">
+        <div class="stamp">актив</div>
+        <p class="card-title">Обновление Hermes v0.19 → latest</p>
+        <p class="card-desc">Проверить актуальную версию и обновиться без потери настроек (клетка, роутинг моделей, Matrix).</p>
+        <div class="now"><b>На чём остановились</b>Сняли бэкап config.yaml/.env/SOUL.md, ждём подтверждения плана миграции.</div>
+        <div class="tags"><span class="tag">hermes</span><span class="tag">vps</span></div>
+      </div>
+      <div class="card">
+        <div class="stamp">актив</div>
+        <p class="card-title">Веб-морда для Hermes (замена Matrix)</p>
+        <p class="card-desc">Спроектировать и собрать собственный веб-интерфейс на HTTPS вместо Matrix.</p>
+        <div class="now"><b>На чём остановились</b>Утверждаем 4 варианта визуального дизайна.</div>
+        <div class="tags"><span class="tag">hermes</span><span class="tag">web</span><span class="tag">дизайн</span></div>
+      </div>
+      <div class="card">
+        <div class="stamp archived">архив</div>
+        <p class="card-title">Настройка Docker-клетки</p>
+        <p class="card-desc">Песочница для shell-команд агента с лимитами и approvals.</p>
+        <div class="now"><b>На чём остановились</b>Клетка реализована и проверена, закрыто.</div>
+        <div class="tags"><span class="tag">hermes</span><span class="tag">безопасность</span></div>
+      </div>
+    </div>
+  </details>
+
+  <details class="drawer">
+    <summary><span class="tab-name">1С</span><span class="tab-count">2 карточки</span></summary>
+    <div class="cards">
+      <div class="card">
+        <div class="stamp">актив</div>
+        <p class="card-title">Выгрузка остатков в Excel</p>
+        <p class="card-desc">Настроить регулярную выгрузку остатков склада из 1С в Excel-отчёт.</p>
+        <div class="now"><b>На чём остановились</b>Обработка написана, тестируем на реальных данных.</div>
+        <div class="tags"><span class="tag">1с</span><span class="tag">excel</span></div>
+      </div>
+      <div class="card">
+        <div class="stamp archived">архив</div>
+        <p class="card-title">Ошибка проведения документов</p>
+        <p class="card-desc">Разобраться, почему часть накладных не проводится за март.</p>
+        <div class="now"><b>На чём остановились</b>Причина найдена — конфликт двух регламентных заданий, исправлено.</div>
+        <div class="tags"><span class="tag">1с</span></div>
+      </div>
+    </div>
+  </details>
+
+  <details class="drawer">
+    <summary><span class="tab-name">Дом и ремонт</span><span class="tab-count">1 карточка</span></summary>
+    <div class="cards">
+      <div class="card">
+        <div class="stamp">актив</div>
+        <p class="card-title">Выбор мастера по натяжным потолкам</p>
+        <p class="card-desc">Сравнить предложения трёх мастеров по потолкам в детской.</p>
+        <div class="now"><b>На чём остановились</b>Собрали три предложения с ценами, ждём решения.</div>
+        <div class="tags"><span class="tag">ремонт</span></div>
+      </div>
+    </div>
+  </details>
+
+  <footer>Вариант 1 · «Картотека» · данные условные, для демонстрации дизайна</footer>
+</div>
+</body>
+</html>

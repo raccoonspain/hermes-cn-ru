@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes — вход</title>
+<style>
+  :root{
+    --sky:#12172b; --sky-deep:#0b0e1c; --panel:#1a2038; --panel-2:#212949;
+    --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
+    --violet:#ad9fe6; --teal:#7fc4b2; --dim-star:#727bab;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:radial-gradient(ellipse at 50% 30%, #1b2245, var(--sky-deep) 70%);
+    color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    height:100vh;
+    display:flex;align-items:center;justify-content:center;
+    position:relative;
+    overflow:hidden;
+  }
+
+  #stars{position:fixed;inset:0;pointer-events:none}
+  .star{
+    position:absolute;border-radius:50%;background:#fff;
+    animation:twinkle 3.5s ease-in-out infinite;
+  }
+  @keyframes twinkle{
+    0%,100%{opacity:.15}
+    50%{opacity:.95}
+  }
+  svg.lines{position:fixed;inset:0;pointer-events:none}
+  svg.lines line{stroke:var(--violet);stroke-width:.6;opacity:.28}
+
+  .stage{position:relative;z-index:2;width:380px;max-width:92vw}
+
+  .brandmark{text-align:center;margin-bottom:34px}
+  .brandmark .glyph{font-size:34px;display:inline-block;margin-bottom:8px;filter:drop-shadow(0 0 10px rgba(240,187,92,.5))}
+  .brandmark h1{margin:0;font-size:28px;font-weight:400;font-style:italic;letter-spacing:.5px}
+  .brandmark p{margin:6px 0 0;font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:1px;color:var(--text-dim)}
+
+  .card{
+    background:rgba(26,32,56,.75);
+    backdrop-filter:blur(6px);
+    border:1px solid var(--panel-line);
+    border-radius:18px;
+    padding:30px 28px;
+  }
+
+  label{display:block;font-family:ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);margin:0 0 7px}
+  label:not(:first-child){margin-top:16px}
+  input[type=password],input[type=text]{
+    width:100%;background:var(--sky-deep);border:1px solid var(--panel-line);border-radius:8px;
+    padding:11px 13px;color:var(--text);font-family:Georgia,serif;font-size:14px;outline:none;
+  }
+  input[type=password]:focus,input[type=text]:focus{border-color:var(--violet)}
+
+  .submit-btn{
+    width:100%;margin-top:20px;background:var(--gold);color:var(--sky-deep);border:none;
+    padding:12px;border-radius:9px;cursor:pointer;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;letter-spacing:.5px;
+  }
+  .submit-btn:hover{filter:brightness(1.06)}
+  .forgot{display:block;text-align:center;margin-top:16px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--dim-star);text-decoration:none}
+  .forgot:hover{color:var(--text-dim)}
+
+  .footnote{text-align:center;margin-top:22px;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--dim-star)}
+</style>
+</head>
+<body>
+
+<div id="stars"></div>
+<svg class="lines" id="lines"></svg>
+
+<div class="stage">
+  <div class="brandmark">
+    <div class="glyph">✦</div>
+    <h1>Hermes</h1>
+    <p>личный ИИ-агент · растёт вместе с вами</p>
+  </div>
+
+  <div class="card">
+    <label>Логин</label>
+    <input type="text" id="loginInput" placeholder="логин" autocomplete="username" autofocus>
+    <label>Пароль</label>
+    <input type="password" id="pwInput" placeholder="••••••••" autocomplete="current-password">
+    <button class="submit-btn" id="submitBtn">Войти →</button>
+    <a class="forgot" href="#" onclick="return false">забыли пароль?</a>
+  </div>
+
+  <div class="footnote">hermes.ctvuprising.ru</div>
+</div>
+
+<script>
+// starfield
+const starsEl = document.getElementById('stars');
+const linesEl = document.getElementById('lines');
+const pts = [];
+for(let i=0;i<50;i++){
+  const x = Math.random()*100, y = Math.random()*100;
+  const size = Math.random()*2.4 + 0.6;
+  const el = document.createElement('div');
+  el.className = 'star';
+  el.style.left = x+'vw'; el.style.top = y+'vh';
+  el.style.width = size+'px'; el.style.height = size+'px';
+  el.style.animationDelay = (Math.random()*3.5)+'s';
+  starsEl.appendChild(el);
+  pts.push([x,y]);
+}
+// a handful of faint constellation lines between nearby-ish stars
+for(let i=0;i<9;i++){
+  const a = pts[Math.floor(Math.random()*pts.length)];
+  const b = pts[Math.floor(Math.random()*pts.length)];
+  const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+  line.setAttribute('x1', a[0]+'%'); line.setAttribute('y1', a[1]+'%');
+  line.setAttribute('x2', b[0]+'%'); line.setAttribute('y2', b[1]+'%');
+  linesEl.appendChild(line);
+}
+
+document.getElementById('submitBtn').addEventListener('click', ()=>{ location.href='home.html'; });
+document.getElementById('pwInput').addEventListener('keydown', e=>{ if(e.key==='Enter') location.href='home.html'; });
+</script>
+</body>
+</html>

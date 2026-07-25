@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Администрирование — Hermes</title>
+<style>
+  :root{
+    --sky:#12172b; --sky-deep:#0c1020; --panel:#1a2038; --panel-2:#212949;
+    --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
+    --violet:#ad9fe6; --teal:#7fc4b2; --red:#e88980; --dim-star:#727bab;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--sky); color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    min-height:100vh; display:grid; grid-template-columns:230px 1fr;
+  }
+  aside{border-right:1px solid var(--panel-line); padding:26px 18px}
+  .brand{font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim)}
+  aside h1{font-size:20px;font-weight:400;font-style:italic;margin:4px 0 26px}
+  nav a{
+    display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:8px;
+    color:var(--text-dim);text-decoration:none;font-size:14px;margin-bottom:2px;
+  }
+  nav a.on{background:var(--panel-2);color:var(--text)}
+  nav a:hover{background:var(--panel)}
+  .back{display:block;margin-top:30px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-dim);text-decoration:none}
+  .back:hover{color:var(--gold)}
+
+  main{padding:32px 40px 60px}
+  h2{font-size:24px;font-weight:400;font-style:italic;margin:0 0 22px}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:36px}
+  .card{background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;padding:18px 20px}
+  .card .lbl{font-family:ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px}
+  .card .big{font-size:26px;font-family:ui-monospace,Consolas,monospace;color:var(--text)}
+  .card .big small{font-size:13px;color:var(--text-dim)}
+  .bar{height:6px;background:var(--sky-deep);border-radius:4px;margin-top:12px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--teal)}
+  .bar.warn i{background:var(--gold)}
+  .bar.danger i{background:var(--red)}
+  .card .sub{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);margin-top:8px}
+
+  .section{margin-bottom:40px}
+  .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .section-head h3{font-size:16px;font-weight:400;font-style:italic;margin:0}
+  .btn{
+    font-family:ui-monospace,Consolas,monospace;font-size:11.5px;background:var(--gold);color:var(--sky-deep);
+    border:none;padding:8px 14px;border-radius:8px;cursor:pointer;
+  }
+
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:11px 16px;font-size:13px;border-bottom:1px solid var(--panel-line)}
+  th{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);font-weight:400}
+  tr:last-child td{border-bottom:none}
+  .badge{font-family:ui-monospace,Consolas,monospace;font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid}
+  .badge.owner{color:var(--gold);border-color:var(--gold)}
+  .badge.member{color:var(--violet);border-color:var(--violet)}
+  .mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-dim)}
+  .row-actions button{
+    background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:6px;
+    padding:4px 9px;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;cursor:pointer;margin-right:4px;
+  }
+  .row-actions button:hover{color:var(--text);border-color:var(--violet)}
+
+  .log{background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;padding:16px 18px}
+  .log-line{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.8;color:var(--text-dim)}
+  .log-line .t{color:var(--dim-star);margin-right:8px}
+  .log-line.err{color:var(--red)}
+  .log-line.ok{color:var(--teal)}
+
+  .overlay{position:fixed;inset:0;background:rgba(6,8,16,.7);display:none;align-items:center;justify-content:center;z-index:10}
+  .overlay.on{display:flex}
+  .modal{width:380px;background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;padding:22px}
+  .modal h3{margin:0 0 16px;font-weight:400;font-style:italic}
+  .modal label{display:block;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);margin:12px 0 5px;text-transform:uppercase;letter-spacing:1px}
+  .modal input,.modal select{width:100%;background:var(--sky-deep);border:1px solid var(--panel-line);border-radius:8px;padding:9px 11px;color:var(--text);font-family:Georgia,serif;font-size:13px}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+  .modal-actions button{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;padding:8px 14px;border-radius:8px;cursor:pointer}
+  .ghost{background:none;color:var(--text-dim);border:1px solid var(--panel-line)}
+</style>
+</head>
+<body>
+
+<aside>
+  <div class="brand">Hermes</div>
+  <h1>Администрирование</h1>
+  <nav>
+    <a class="on">📊 Обзор</a>
+    <a>👥 Пользователи</a>
+    <a>🖥️ VPS и агент</a>
+    <a>🧾 Журнал</a>
+  </nav>
+  <a class="back" href="home.html">🏠 на главную</a>
+  <a class="back" href="project-selector.html">← в проекты</a>
+</aside>
+
+<main>
+  <h2>Обзор</h2>
+
+  <div class="cards">
+    <div class="card">
+      <div class="lbl">CPU</div>
+      <div class="big">34<small>%</small></div>
+      <div class="bar"><i style="width:34%"></i></div>
+      <div class="sub">8 vCPU · RU-датацентр</div>
+    </div>
+    <div class="card">
+      <div class="lbl">RAM</div>
+      <div class="big">5.1<small>/ 8 GB</small></div>
+      <div class="bar warn"><i style="width:64%"></i></div>
+      <div class="sub">64% занято</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Диск (NVMe)</div>
+      <div class="big">41<small>/ 90 GB</small></div>
+      <div class="bar"><i style="width:46%"></i></div>
+      <div class="sub">кэш вложений + skills</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Кредиты wormsoft.ru</div>
+      <div class="big">1.8M<small>/ 3.0M</small></div>
+      <div class="bar warn"><i style="width:60%"></i></div>
+      <div class="sub">окно 4 часа · Payed</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Rate limit</div>
+      <div class="big">37<small>/ 120 req/мин</small></div>
+      <div class="bar"><i style="width:31%"></i></div>
+      <div class="sub">пик за последний час: 98</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Активные сессии</div>
+      <div class="big">3</div>
+      <div class="sub">2 пользователя онлайн</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <h3>Пользователи</h3>
+      <button class="btn" onclick="document.getElementById('overlay').classList.add('on')">+ создать пользователя</button>
+    </div>
+    <table>
+      <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Проектов</th><th>Последняя активность</th><th></th></tr></thead>
+      <tbody>
+        <tr>
+          <td id="name-dem">dem</td>
+          <td class="mono">dem@hermes.ctvuprising.ru</td>
+          <td><span class="badge owner">владелец</span></td>
+          <td>27</td>
+          <td class="mono">2 мин назад</td>
+          <td class="row-actions">
+            <button onclick="openEdit('name-dem','dem@hermes.ctvuprising.ru','владелец')">изменить</button>
+            <button>сброс пароля</button>
+          </td>
+        </tr>
+        <tr>
+          <td id="name-gleb">Глеб (сын)</td>
+          <td class="mono">gleb@hermes.ctvuprising.ru</td>
+          <td><span class="badge member">участник</span></td>
+          <td>6</td>
+          <td class="mono">вчера, 19:40</td>
+          <td class="row-actions">
+            <button onclick="openEdit('name-gleb','gleb@hermes.ctvuprising.ru','участник')">изменить</button>
+            <button>сброс пароля</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-head"><h3>Журнал (последнее)</h3></div>
+    <div class="log">
+      <div class="log-line"><span class="t">15:34:02</span>dem → сессия «Веб-морда для Hermes» → write_file /result/project-selector.html</div>
+      <div class="log-line ok"><span class="t">15:10:19</span>project_index_update успешно, embedding пересчитан</div>
+      <div class="log-line"><span class="t">14:58:40</span>Глеб → новая сессия в группе «Английский язык»</div>
+      <div class="log-line err"><span class="t">13:22:11</span>wormsoft.ru: 429 rate limit на delegation (max_concurrent_children=2), повтор через 4с — успешно</div>
+      <div class="log-line"><span class="t">09:05:00</span>systemd: hermes-gateway.service активен, linger подтверждён</div>
+    </div>
+  </div>
+</main>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3>Новый пользователь</h3>
+    <label>Имя</label>
+    <input type="text" placeholder="например, Глеб">
+    <p style="font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);margin:4px 0 0">
+      имя задаёт администратор — пользователю не нужно ничего придумывать самому, можно поменять в любой момент
+    </p>
+    <label>Логин / e-mail</label>
+    <input type="text" placeholder="user@hermes.ctvuprising.ru">
+    <label>Роль</label>
+    <select><option>участник</option><option>владелец</option></select>
+    <div class="modal-actions">
+      <button class="ghost" onclick="document.getElementById('overlay').classList.remove('on')">Отмена</button>
+      <button class="btn" onclick="document.getElementById('overlay').classList.remove('on')">Создать</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="editOverlay">
+  <div class="modal">
+    <h3>Изменить пользователя</h3>
+    <label>Имя</label>
+    <input type="text" id="editNameInput">
+    <label>Логин / e-mail</label>
+    <input type="text" id="editLoginInput">
+    <label>Роль</label>
+    <select id="editRoleSelect"><option>участник</option><option>владелец</option></select>
+    <div class="modal-actions">
+      <button class="ghost" onclick="document.getElementById('editOverlay').classList.remove('on')">Отмена</button>
+      <button class="btn" id="editSaveBtn">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let editingCellId = null;
+
+function openEdit(cellId, login, role){
+  editingCellId = cellId;
+  document.getElementById('editNameInput').value = document.getElementById(cellId).textContent.trim();
+  document.getElementById('editLoginInput').value = login;
+  document.getElementById('editRoleSelect').value = role;
+  document.getElementById('editOverlay').classList.add('on');
+}
+
+document.getElementById('editSaveBtn').addEventListener('click', ()=>{
+  const newName = document.getElementById('editNameInput').value.trim();
+  if(newName && editingCellId) document.getElementById(editingCellId).textContent = newName;
+  document.getElementById('editOverlay').classList.remove('on');
+});
+</script>
+
+</body>
+</html>

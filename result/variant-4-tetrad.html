@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тетрадь проектов — dem</title>
+<style>
+  :root{
+    --paper:#fbf7ee;
+    --rule:#bdd0e6;
+    --margin:#d66b65;
+    --ink:#2e2a22;
+    --ink-soft:#726c5c;
+    --blue:#3e6fa6;
+    --highlight:#f4d35e;
+    --tab-it:#3e6fa6;
+    --tab-1c:#5f9e7a;
+    --tab-dom:#c98a4b;
+    --tab-all:#9a8fb0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:#e9e2d0;
+    color:var(--ink);
+    font-family:Georgia,"Iowan Old Style",serif;
+    display:flex;
+    min-height:100vh;
+  }
+
+  .tabs{
+    display:flex;
+    flex-direction:column;
+    padding-top:60px;
+    gap:14px;
+    flex-shrink:0;
+  }
+  .tab{
+    writing-mode:vertical-rl;
+    transform:rotate(180deg);
+    color:#fff;
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:12px;
+    letter-spacing:1.5px;
+    padding:16px 8px;
+    border-radius:8px 0 0 8px;
+    cursor:pointer;
+    text-transform:uppercase;
+  }
+  .tab.all{background:var(--tab-all)}
+  .tab.it{background:var(--tab-it)}
+  .tab.c1{background:var(--tab-1c)}
+  .tab.dom{background:var(--tab-dom)}
+
+  .page{
+    flex:1;
+    background:
+      repeating-linear-gradient(var(--paper), var(--paper) 33px, var(--rule) 34px);
+    background-position: 0 92px;
+    position:relative;
+    padding:44px 56px 90px 88px;
+    box-shadow:-6px 0 18px rgba(0,0,0,.08);
+  }
+  .page::before{
+    content:"";
+    position:absolute;
+    left:64px; top:0; bottom:0;
+    width:1.5px;
+    background:var(--margin);
+  }
+
+  header{margin-bottom:34px}
+  header .kicker{
+    font-family:ui-monospace,monospace;
+    font-size:11px;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+  }
+  header h1{
+    font-size:32px;
+    margin:4px 0 0;
+    font-weight:700;
+    position:relative;
+    display:inline-block;
+  }
+  header h1::after{
+    content:"";
+    position:absolute;
+    left:-2px; right:-6px; bottom:2px;
+    height:9px;
+    background:var(--highlight);
+    z-index:-1;
+    opacity:.65;
+  }
+
+  .search{
+    margin:26px 0 8px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+  .search label{
+    font-family:ui-monospace,monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    white-space:nowrap;
+  }
+  .search input{
+    flex:1;
+    background:transparent;
+    border:none;
+    border-bottom:1px dotted var(--ink-soft);
+    padding:4px 2px;
+    font-family:Georgia,serif;
+    font-style:italic;
+    font-size:14px;
+    color:var(--ink);
+    outline:none;
+  }
+
+  .groupname{
+    font-size:19px;
+    font-weight:700;
+    margin:36px 0 6px;
+    color:var(--blue);
+  }
+  .groupname.c1{color:var(--tab-1c)}
+  .groupname.dom{color:var(--tab-dom)}
+  .groupname.all{color:var(--tab-all)}
+  .groupname .count{
+    font-family:ui-monospace,monospace;
+    font-weight:400;
+    font-size:11px;
+    color:var(--ink-soft);
+    margin-left:8px;
+  }
+
+  .row{
+    display:grid;
+    grid-template-columns:1fr 190px;
+    gap:18px;
+    padding:8px 0 12px;
+  }
+  .row .main .name{font-weight:700;font-size:15.5px}
+  .row .main .desc{font-size:13.5px;color:var(--ink-soft);margin:3px 0 6px}
+  .row .main .now{font-size:13px;font-style:italic;color:var(--ink)}
+  .row .main .now::before{content:"↳ ";font-style:normal;color:var(--ink-soft)}
+
+  .margin-col{
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:11px;
+    color:var(--margin);
+    padding-top:2px;
+  }
+  .margin-col .status{
+    display:inline-block;
+    margin-bottom:5px;
+    transform:rotate(-2deg);
+  }
+  .margin-col .status.archived{color:#9a9484}
+  .margin-col .tags span{
+    display:inline-block;
+    background:var(--highlight);
+    color:var(--ink);
+    font-family:Georgia,serif;
+    font-style:italic;
+    font-size:11px;
+    padding:1px 6px;
+    border-radius:3px;
+    margin:2px 4px 0 0;
+    transform:rotate(-1.5deg);
+  }
+</style>
+</head>
+<body>
+  <div class="tabs">
+    <div class="tab all">ALL</div>
+    <div class="tab it">IT / DevOps</div>
+    <div class="tab c1">1С</div>
+    <div class="tab dom">Дом и ремонт</div>
+  </div>
+
+  <div class="page">
+    <header>
+      <div class="kicker">Hermes · рабочая тетрадь</div>
+      <h1>Проекты — dem</h1>
+    </header>
+
+    <div class="search">
+      <label>искать похожее:</label>
+      <input type="text" placeholder="например, «счётчики воды»…">
+    </div>
+
+    <div class="groupname all">ALL — неразобранное <span class="count">2 записи</span></div>
+
+    <div class="row">
+      <div class="main">
+        <div class="name">2026-07-18_счётчики-воды</div>
+        <div class="desc">Разобраться, как передать показания счётчиков воды через приложение УК.</div>
+        <div class="now">Прислал скриншот формы — агент разобрал, но нужен логин от личного кабинета, ждём.</div>
+      </div>
+      <div class="margin-col">
+        <div class="status">● активен</div>
+        <div class="tags"></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="main">
+        <div class="name">2026-07-10_рецепт-плова</div>
+        <div class="desc">Адаптировать рецепт плова из видео под казан на 8 литров.</div>
+        <div class="now">Готовый пересчитанный рецепт отправлен файлом.</div>
+      </div>
+      <div class="margin-col">
+        <div class="status archived">○ архив</div>
+        <div class="tags"></div>
+      </div>
+    </div>
+
+    <div class="groupname">IT / DevOps <span class="count">3 записи</span></div>
+
+    <div class="row">
+      <div class="main">
+        <div class="name">Обновление Hermes v0.19 → latest</div>
+        <div class="desc">Проверить актуальную версию и обновиться без потери настроек.</div>
+        <div class="now">Сняли бэкап config.yaml/.env/SOUL.md, ждём подтверждения плана миграции.</div>
+      </div>
+      <div class="margin-col">
+        <div class="status">● активен</div>
+        <div class="tags"><span>hermes</span><span>vps</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="main">
+        <div class="name">Веб-морда для Hermes</div>
+        <div class="desc">Спроектировать и собрать собственный веб-интерфейс на HTTPS вместо Matrix.</div>
+        <div class="now">Утверждаем 4 варианта визуального дизайна.</div>
+      </div>
+      <div class="margin-col">
+        <div class="status">● активен</div>
+        <div class="tags"><span>hermes</span><span>web</span><span>дизайн</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="main">
+        <div class="name">Настройка Docker-клетки</div>
+        <div class="desc">Песочница для shell-команд агента с лимитами и approvals.</div>
+        <div class="now">Клетка реализована и проверена, закрыто.</div>
+      </div>
+      <div class="margin-col">
+        <div class="status archived">○ архив</div>
+        <div class="tags"><span>hermes</span><span>безопасность</span></div>
+      </div>
+    </div>
+
+    <div class="groupname c1">1С <span class="count">2 записи</span></div>
+
+    <div class="row">
+      <div class="main">
+        <div class="name">Выгрузка остатков в Excel</div>
+        <div class="desc">Настроить регулярную выгрузку остатков склада из 1С в Excel-отчёт.</div>
+        <div class="now">Обработка написана, тестируем на реальных данных.</div>
+      </div>
+      <div class="margin-col">
+        <div class="status">● активен</div>
+        <div class="tags"><span>1с</span><span>excel</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="main">
+        <div class="name">Ошибка проведения документов</div>
+        <div class="desc">Разобраться, почему часть накладных не проводится за март.</div>
+        <div class="now">Причина найдена — конфликт двух регламентных заданий, исправлено.</div>
+      </div>
+      <div class="margin-col">
+        <div class="status archived">○ архив</div>
+        <div class="tags"><span>1с</span></div>
+      </div>
+    </div>
+
+    <div class="groupname dom">Дом и ремонт <span class="count">1 запись</span></div>
+
+    <div class="row">
+      <div class="main">
+        <div class="name">Мастер по натяжным потолкам</div>
+        <div class="desc">Сравнить предложения трёх мастеров по потолкам в детской.</div>
+        <div class="now">Собрали три предложения с ценами, ждём решения.</div>
+      </div>
+      <div class="margin-col">
+        <div class="status">● активен</div>
+        <div class="tags"><span>ремонт</span></div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Созвездие — dem</title>
+<style>
+  :root{
+    --sky:#12172b;
+    --sky-deep:#0c1020;
+    --panel:#1a2038;
+    --panel-line:#323a5c;
+    --text:#f1ede3;
+    --text-dim:#8a92b8;
+    --gold:#e8b04b;
+    --violet:#8b7ec8;
+    --dim-star:#4a5378;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1px 1px at 20% 30%, #fff8, transparent),
+      radial-gradient(1px 1px at 65% 15%, #fff6, transparent),
+      radial-gradient(1.5px 1.5px at 82% 60%, #fff9, transparent),
+      radial-gradient(1px 1px at 40% 80%, #fff5, transparent),
+      radial-gradient(1px 1px at 12% 65%, #fff7, transparent),
+      radial-gradient(1.5px 1.5px at 92% 30%, #fff6, transparent),
+      radial-gradient(1px 1px at 55% 55%, #fff5, transparent),
+      linear-gradient(180deg, var(--sky-deep), var(--sky) 40%);
+    background-attachment:fixed;
+    color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    min-height:100vh;
+    display:grid;
+    grid-template-columns:250px 1fr;
+  }
+  aside{
+    padding:38px 22px;
+    border-right:1px solid var(--panel-line);
+  }
+  aside .brand{
+    font-family:ui-monospace,"SF Mono",Consolas,monospace;
+    font-size:11px;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin-bottom:4px;
+  }
+  aside h1{
+    font-size:24px;
+    margin:0 0 30px;
+    font-weight:400;
+    font-style:italic;
+    color:var(--text);
+  }
+  nav.groups{display:flex;flex-direction:column;gap:2px}
+  nav.groups a{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:11px 12px;
+    border-radius:8px;
+    color:var(--text-dim);
+    text-decoration:none;
+    font-size:14.5px;
+    cursor:pointer;
+  }
+  nav.groups a .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--gold);
+    box-shadow:0 0 6px 1px var(--gold);
+    flex-shrink:0;
+  }
+  nav.groups a.active{background:var(--panel);color:var(--text)}
+  nav.groups a .n{margin-left:auto;font-family:ui-monospace,monospace;font-size:11px;color:var(--text-dim)}
+
+  .search{
+    margin-top:34px;
+    padding-top:20px;
+    border-top:1px solid var(--panel-line);
+  }
+  .search label{
+    display:block;
+    font-family:ui-monospace,monospace;
+    font-size:10.5px;
+    letter-spacing:1.5px;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin-bottom:8px;
+  }
+  .search input{
+    width:100%;
+    background:var(--panel);
+    border:1px solid var(--panel-line);
+    border-radius:8px;
+    color:var(--text);
+    padding:9px 12px;
+    font-size:13px;
+    font-family:Georgia,serif;
+  }
+
+  main{padding:44px 44px 80px}
+  main > .grouphead{
+    display:flex;
+    align-items:baseline;
+    gap:14px;
+    margin-bottom:26px;
+  }
+  main > .grouphead h2{
+    font-size:26px;
+    font-weight:400;
+    font-style:italic;
+    margin:0;
+  }
+  main > .grouphead span{
+    font-family:ui-monospace,monospace;
+    font-size:12px;
+    color:var(--text-dim);
+  }
+
+  .constellation{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+    gap:26px;
+    margin-bottom:54px;
+    position:relative;
+  }
+  .star-card{
+    background:linear-gradient(160deg, var(--panel), var(--sky-deep));
+    border:1px solid var(--panel-line);
+    border-radius:14px;
+    padding:20px 22px;
+    position:relative;
+  }
+  .star-card .mark{
+    position:absolute;
+    top:20px; right:20px;
+    font-size:13px;
+    color:var(--gold);
+  }
+  .star-card .mark.dim{color:var(--dim-star)}
+  .star-card h3{
+    margin:0 18px 8px 0;
+    font-size:17px;
+    font-weight:400;
+    color:var(--text);
+  }
+  .star-card p{
+    font-size:13px;
+    color:var(--text-dim);
+    line-height:1.55;
+    margin:0 0 14px;
+    font-family:Georgia,serif;
+  }
+  .star-card .now{
+    font-family:ui-monospace,monospace;
+    font-size:11.5px;
+    color:#c9cde8;
+    border-left:2px solid var(--violet);
+    padding-left:10px;
+    line-height:1.6;
+    margin-bottom:14px;
+  }
+  .star-card .now::before{
+    content:"текущая точка ›";
+    display:block;
+    color:var(--violet);
+    font-size:10px;
+    letter-spacing:.5px;
+    margin-bottom:3px;
+  }
+  .tags{display:flex;gap:6px;flex-wrap:wrap}
+  .tag{
+    font-family:ui-monospace,monospace;
+    font-size:10px;
+    color:var(--violet);
+    background:rgba(139,126,200,.12);
+    border:1px solid rgba(139,126,200,.3);
+    padding:3px 8px;
+    border-radius:20px;
+  }
+  section.group-block:not(:first-of-type) main{margin-top:0}
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand">Hermes</div>
+  <h1>Созвездие тем</h1>
+  <nav class="groups">
+    <a class="active"><span class="dot"></span>ALL — неразобранное<span class="n">2</span></a>
+    <a><span class="dot" style="background:#e8b04b"></span>IT / DevOps<span class="n">3</span></a>
+    <a><span class="dot" style="background:#8b7ec8;box-shadow:0 0 6px 1px #8b7ec8"></span>1С<span class="n">2</span></a>
+    <a><span class="dot" style="background:#6fb0a1;box-shadow:0 0 6px 1px #6fb0a1"></span>Дом и ремонт<span class="n">1</span></a>
+  </nav>
+  <div class="search">
+    <label>Поискать похожую тему</label>
+    <input type="text" placeholder="например: счётчики воды…">
+  </div>
+</aside>
+<main>
+
+  <div class="grouphead"><h2>ALL — неразобранное</h2><span>2 звезды без созвездия</span></div>
+  <div class="constellation">
+    <div class="star-card">
+      <span class="mark">✦</span>
+      <h3>2026-07-18 · счётчики воды</h3>
+      <p>Разобраться, как передать показания счётчиков воды через приложение УК.</p>
+      <div class="now">Прислал скриншот формы — агент разобрал, но нужен логин от личного кабинета, ждём.</div>
+      <div class="tags"></div>
+    </div>
+    <div class="star-card">
+      <span class="mark dim">✧</span>
+      <h3>2026-07-10 · рецепт плова</h3>
+      <p>Адаптировать рецепт плова из видео под казан на 8 литров.</p>
+      <div class="now">Готовый пересчитанный рецепт отправлен файлом.</div>
+      <div class="tags"></div>
+    </div>
+  </div>
+
+  <div class="grouphead"><h2>IT / DevOps</h2><span>3 звезды</span></div>
+  <div class="constellation">
+    <div class="star-card">
+      <span class="mark">✦</span>
+      <h3>Обновление Hermes v0.19 → latest</h3>
+      <p>Проверить актуальную версию и обновиться без потери настроек.</p>
+      <div class="now">Сняли бэкап config.yaml/.env/SOUL.md, ждём подтверждения плана миграции.</div>
+      <div class="tags"><span class="tag">hermes</span><span class="tag">vps</span></div>
+    </div>
+    <div class="star-card">
+      <span class="mark">✦</span>
+      <h3>Веб-морда для Hermes</h3>
+      <p>Спроектировать и собрать собственный веб-интерфейс на HTTPS вместо Matrix.</p>
+      <div class="now">Утверждаем 4 варианта визуального дизайна.</div>
+      <div class="tags"><span class="tag">hermes</span><span class="tag">web</span><span class="tag">дизайн</span></div>
+    </div>
+    <div class="star-card">
+      <span class="mark dim">✧</span>
+      <h3>Настройка Docker-клетки</h3>
+      <p>Песочница для shell-команд агента с лимитами и approvals.</p>
+      <div class="now">Клетка реализована и проверена, закрыто.</div>
+      <div class="tags"><span class="tag">hermes</span><span class="tag">безопасность</span></div>
+    </div>
+  </div>
+
+  <div class="grouphead"><h2>1С</h2><span>2 звезды</span></div>
+  <div class="constellation">
+    <div class="star-card">
+      <span class="mark">✦</span>
+      <h3>Выгрузка остатков в Excel</h3>
+      <p>Настроить регулярную выгрузку остатков склада из 1С в Excel-отчёт.</p>
+      <div class="now">Обработка написана, тестируем на реальных данных.</div>
+      <div class="tags"><span class="tag">1с</span><span class="tag">excel</span></div>
+    </div>
+    <div class="star-card">
+      <span class="mark dim">✧</span>
+      <h3>Ошибка проведения документов</h3>
+      <p>Разобраться, почему часть накладных не проводится за март.</p>
+      <div class="now">Причина найдена — конфликт двух регламентных заданий, исправлено.</div>
+      <div class="tags"><span class="tag">1с</span></div>
+    </div>
+  </div>
+
+  <div class="grouphead"><h2>Дом и ремонт</h2><span>1 звезда</span></div>
+  <div class="constellation">
+    <div class="star-card">
+      <span class="mark">✦</span>
+      <h3>Мастер по натяжным потолкам</h3>
+      <p>Сравнить предложения трёх мастеров по потолкам в детской.</p>
+      <div class="now">Собрали три предложения с ценами, ждём решения.</div>
+      <div class="tags"><span class="tag">ремонт</span></div>
+    </div>
+  </div>
+
+</main>
+</body>
+</html>

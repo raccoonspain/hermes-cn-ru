@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Веб-морда для Hermes — dem</title>
+<style>
+  :root{
+    --sky:#12172b; --sky-deep:#0c1020; --panel:#1a2038; --panel-2:#212949;
+    --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
+    --violet:#ad9fe6; --teal:#7fc4b2; --dim-star:#727bab;
+    --c-source:#ad9fe6; --c-outer:#7fc4b2; --c-result:#f0bb5c;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:var(--sky); color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    height:100vh; display:grid;
+    grid-template-columns:250px 1fr 360px;
+    grid-template-rows:56px 1fr;
+    grid-template-areas:"top top top" "tree chat side";
+  }
+  .topbar{
+    grid-area:top; border-bottom:1px solid var(--panel-line);
+    display:flex; align-items:center; gap:14px; padding:0 20px;
+    font-family:ui-monospace,Consolas,monospace; font-size:12.5px; color:var(--text-dim);
+  }
+  .topbar a{color:var(--text-dim); text-decoration:none}
+  .topbar a:hover{color:var(--gold)}
+  .topbar .title{color:var(--text); font-family:Georgia,serif; font-size:15.5px; font-style:italic}
+  .topbar .status{margin-left:auto; display:flex; align-items:center; gap:6px}
+  .topbar .dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 5px var(--teal)}
+
+  /* ---- tree ---- */
+  .tree{grid-area:tree; border-right:1px solid var(--panel-line); padding:18px 14px; overflow-y:auto}
+  .tree .glabel{font-family:ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);margin:14px 0 6px}
+  .tree .glabel:first-child{margin-top:0}
+  .node{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-dim)}
+  .node:hover{background:var(--panel);color:var(--text)}
+  .node.file{padding-left:20px}
+  .node .ic{width:15px;text-align:center;flex-shrink:0;font-size:12px}
+  .node.folder-source .ic{color:var(--c-source)}
+  .node.folder-outer .ic{color:var(--c-outer)}
+  .node.folder-result .ic{color:var(--c-result)}
+  .node .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* ---- chat ---- */
+  .chat{grid-area:chat; display:flex; flex-direction:column; min-height:0}
+  .messages{flex:1; overflow-y:auto; padding:26px 34px; display:flex; flex-direction:column; gap:20px}
+  .msg{max-width:72%; display:flex; flex-direction:column; gap:8px}
+  .msg.user{align-self:flex-end; align-items:flex-end}
+  .msg.agent{align-self:flex-start}
+  .bubble{padding:13px 16px; border-radius:14px; font-size:14px; line-height:1.55; position:relative}
+  .msg.user .bubble{background:var(--panel-2); border:1px solid var(--violet); border-bottom-right-radius:3px}
+  .msg.agent .bubble{background:var(--panel); border:1px solid var(--panel-line); border-bottom-left-radius:3px}
+  .msg .meta{font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--text-dim)}
+  .msg.highlight-flash .bubble{animation:flashglow 1.6s ease}
+  @keyframes flashglow{
+    0%{box-shadow:0 0 0 2px var(--gold)}
+    70%{box-shadow:0 0 0 2px var(--gold)}
+    100%{box-shadow:0 0 0 0 transparent}
+  }
+
+  /* markdown rendering */
+  .md-rendered{font-size:14px;line-height:1.6}
+  .md-rendered h1,.md-rendered h2,.md-rendered h3{margin:0 0 8px;font-weight:600;color:var(--text);font-family:Georgia,serif}
+  .md-rendered h1{font-size:18px} .md-rendered h2{font-size:16px} .md-rendered h3{font-size:14.5px}
+  .md-rendered p{margin:0 0 10px}
+  .md-rendered p:last-child{margin-bottom:0}
+  .md-rendered ul,.md-rendered ol{margin:0 0 10px;padding-left:20px}
+  .md-rendered li{margin-bottom:3px}
+  .md-rendered code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;background:var(--sky-deep);color:var(--gold);padding:1px 5px;border-radius:4px}
+  .md-rendered strong{color:var(--text);font-weight:700}
+  .md-rendered table{border-collapse:collapse;width:100%;margin:6px 0 12px;font-size:13px}
+  .md-rendered th,.md-rendered td{border:1px solid var(--panel-line);padding:6px 10px;text-align:left}
+  .md-rendered th{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);background:var(--sky-deep)}
+  .copy-btn{
+    position:absolute;top:8px;right:8px;background:none;border:1px solid var(--panel-line);color:var(--text-dim);
+    font-family:ui-monospace,Consolas,monospace;font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;opacity:0;
+  }
+  .bubble:hover .copy-btn{opacity:1}
+  .copy-btn:hover{color:var(--text);border-color:var(--violet)}
+  .copy-btn.copied{color:var(--teal);border-color:var(--teal);opacity:1}
+  .attach-row{display:flex;gap:8px;flex-wrap:wrap}
+  .attach-chip{
+    display:flex;align-items:center;gap:6px;font-family:ui-monospace,Consolas,monospace;font-size:11px;
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:5px 9px;color:var(--text-dim);
+    cursor:pointer;
+  }
+  .attach-chip:hover{color:var(--text);border-color:var(--gold)}
+  .attach-chip::after{content:"⭳";opacity:.5;margin-left:2px}
+  .attach-chip:hover::after{opacity:1}
+  .attach-chip .sw{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+  .sw.source{background:var(--c-source)} .sw.outer{background:var(--c-outer)} .sw.result{background:var(--c-result)}
+
+  .composer{border-top:1px solid var(--panel-line); padding:16px 22px 20px}
+  .compose-attachments{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .compose-attachments .thumb{
+    width:52px;height:52px;border-radius:8px;border:1px solid var(--panel-line);
+    background:var(--panel) center/cover no-repeat; position:relative; overflow:hidden;
+  }
+  .compose-box{display:flex;align-items:flex-end;gap:10px;background:var(--panel);border:1px solid var(--panel-line);border-radius:14px;padding:8px 8px 8px 14px}
+  .compose-box textarea{
+    flex:1;background:none;border:none;outline:none;resize:none;color:var(--text);
+    font-family:Georgia,serif;font-size:14px;line-height:1.5;max-height:120px;padding:8px 0;
+  }
+  .icon-btn{
+    background:none;border:1px solid var(--panel-line);color:var(--text-dim);width:36px;height:36px;
+    border-radius:10px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  }
+  .icon-btn:hover{color:var(--text);border-color:var(--violet)}
+  .send-btn{background:var(--gold);border:none;color:var(--sky-deep);width:36px;height:36px;border-radius:10px;cursor:pointer;flex-shrink:0;font-size:14px}
+  .compose-hint{font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--dim-star);margin-top:8px}
+
+  /* ---- side panel ---- */
+  .side{grid-area:side; border-left:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0}
+  .side-tabs{display:flex; border-bottom:1px solid var(--panel-line)}
+  .side-tabs button{
+    flex:1;background:none;border:none;color:var(--text-dim);padding:13px 8px;cursor:pointer;
+    font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.5px;text-transform:uppercase;
+    border-bottom:2px solid transparent;
+  }
+  .side-tabs button.on{color:var(--text);border-bottom-color:var(--gold)}
+  .side-pane{flex:1;overflow-y:auto;padding:16px 18px;display:none}
+  .side-pane.on{display:block}
+
+  .log-line{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.7;margin-bottom:12px;color:var(--text-dim)}
+  .log-line .t{color:var(--dim-star);margin-right:6px}
+  .log-line b{color:var(--text);font-weight:600}
+  .log-line.tool{color:var(--violet)}
+  .log-line.tool::before{content:"→ ";}
+  .log-line.model{color:var(--teal)}
+
+  .file-row{display:flex;align-items:flex-start;gap:9px;padding:10px 0;border-bottom:1px solid var(--panel-line)}
+  .file-row .sw{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+  .file-row .info{flex:1;min-width:0}
+  .file-row .fname{font-size:12.5px;color:var(--text);word-break:break-all}
+  .file-row .fmeta{font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--text-dim);margin-top:2px}
+  .file-row .facts{display:flex;gap:4px;flex-shrink:0}
+  .file-row .facts button{
+    background:none;border:1px solid var(--panel-line);color:var(--text-dim);width:24px;height:24px;
+    border-radius:6px;cursor:pointer;font-size:11px;
+  }
+  .file-row .facts button:hover{color:var(--text);border-color:var(--violet)}
+
+  .legend{display:flex;gap:14px;font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--text-dim);margin-bottom:14px;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .legend .sw{width:7px;height:7px;border-radius:50%}
+
+  /* ---- editor overlay ---- */
+  .overlay{position:fixed;inset:0;background:rgba(6,8,16,.7);display:none;align-items:center;justify-content:center;z-index:10}
+  .overlay.on{display:flex}
+  .editor{width:640px;max-width:90vw;background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;overflow:hidden}
+  .editor-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--panel-line);font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-dim)}
+  .editor textarea{width:100%;height:340px;background:var(--sky-deep);color:var(--text);border:none;outline:none;padding:16px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;resize:none}
+  .editor-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--panel-line)}
+  .editor-foot button{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;padding:8px 14px;border-radius:8px;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <a href="home.html" title="на главную">🏠</a>
+  <a href="project-selector.html">← к проектам</a>
+  <span class="title">🖥️ IT / DevOps · Веб-морда для Hermes</span>
+  <span class="status"><span class="dot"></span>active</span>
+</div>
+
+<div class="tree" id="tree">
+  <div class="node file"><span class="ic">📄</span><span class="name">AGENTS.md</span></div>
+  <div class="node file"><span class="ic">📄</span><span class="name">history.md</span></div>
+  <div class="node file"><span class="ic">📄</span><span class="name">about.md</span></div>
+
+  <div class="glabel">📥 source — от человека</div>
+  <div class="node file folder-source"><span class="ic">🖼️</span><span class="name">hermes-workspace-tree.png</span></div>
+  <div class="node file folder-source"><span class="ic">🖼️</span><span class="name">project-folder-table.png</span></div>
+  <div class="node file folder-source"><span class="ic">🖼️</span><span class="name">session-is-project-concept.png</span></div>
+
+  <div class="glabel">🔎 outer — нашёл агент</div>
+  <div class="node file folder-outer"><span class="ic">📄</span><span class="name">hermes-plugins-doc-snapshot.md</span></div>
+
+  <div class="glabel">✨ result — сгенерировал агент</div>
+  <div class="node file folder-result"><span class="ic">📄</span><span class="name">hermes-prj-structure.md</span></div>
+  <div class="node file folder-result"><span class="ic">🌐</span><span class="name">variant-1-kartoteka.html</span></div>
+  <div class="node file folder-result"><span class="ic">🌐</span><span class="name">variant-2-sozvezdie.html</span></div>
+  <div class="node file folder-result"><span class="ic">🌐</span><span class="name">variant-3-pult.html</span></div>
+  <div class="node file folder-result"><span class="ic">🌐</span><span class="name">variant-4-tetrad.html</span></div>
+  <div class="node file folder-result"><span class="ic">🌐</span><span class="name">project-selector.html</span></div>
+</div>
+
+<div class="chat">
+  <div class="messages" id="messages">
+
+    <div class="msg user" id="msg-1">
+      <div class="attach-row">
+        <div class="attach-chip"><span class="sw source"></span>hermes-workspace-tree.png</div>
+        <div class="attach-chip"><span class="sw source"></span>project-folder-table.png</div>
+      </div>
+      <div class="bubble">Рассмотри мои материалы по работе с гермесом и дай свою оценку</div>
+      <div class="meta">14:02</div>
+    </div>
+
+    <div class="msg agent" id="msg-2">
+      <div class="bubble">
+        <div class="md-src" hidden>Посмотрел ваши диаграммы в контексте `state.md` — это ровно следующий пункт плана.
+
+Сверился с официальной документацией Hermes: `project_create/list/switch` не существуют — дублирования нет.
+
+**Что хорошо:**
+- разделение `source`/`outer`/`result` закрывает провенанс
+- `about.md` — лёгкий человекочитаемый индекс
+
+**Что доработать:**
+- статус проекта (active/archived)
+- ротация `history.md` при росте</div>
+        <div class="md-rendered"></div>
+        <button class="copy-btn" title="скопировать как Markdown">⧉ md</button>
+      </div>
+      <div class="meta">14:03 · wormsoft/agent/high</div>
+    </div>
+
+    <div class="msg user" id="msg-3">
+      <div class="bubble">Давай теперь займёмся веб интерфейсом. Предложи 3-4 варианта дизайна со случайно заполненными данными.</div>
+      <div class="meta">14:41</div>
+    </div>
+
+    <div class="msg agent" id="msg-4">
+      <div class="bubble">
+        <div class="md-src" hidden>Сделал 4 направления — картотека, созвездие (в духе графа Obsidian), терминал-пульт и тетрадь. Сохранил в `/result`, можно открыть и сравнить.</div>
+        <div class="md-rendered"></div>
+        <button class="copy-btn" title="скопировать как Markdown">⧉ md</button>
+      </div>
+      <div class="attach-row">
+        <div class="attach-chip"><span class="sw result"></span>variant-1-kartoteka.html</div>
+        <div class="attach-chip"><span class="sw result"></span>variant-2-sozvezdie.html</div>
+        <div class="attach-chip"><span class="sw result"></span>variant-3-pult.html</div>
+        <div class="attach-chip"><span class="sw result"></span>variant-4-tetrad.html</div>
+      </div>
+      <div class="meta">14:52 · wormsoft/agent/high</div>
+    </div>
+
+    <div class="msg user" id="msg-5">
+      <div class="bubble">Понравился вариант 2. Список Групп слева с поиском и закреплением, Проекты справа с фильтрами, и третья область с about.md при клике…</div>
+      <div class="meta">15:10</div>
+    </div>
+
+    <div class="msg agent" id="msg-6">
+      <div class="bubble">
+        <div class="md-src" hidden>Собрал интерактивный селектор по всем пунктам — поиск/закрепление групп, RAG-поиск + облако тегов + статус, слайд-панель с `about.md`.</div>
+        <div class="md-rendered"></div>
+        <button class="copy-btn" title="скопировать как Markdown">⧉ md</button>
+      </div>
+      <div class="attach-row">
+        <div class="attach-chip"><span class="sw result"></span>project-selector.html</div>
+      </div>
+      <div class="meta">15:34 · wormsoft/agent/high</div>
+    </div>
+
+    <div class="msg user" id="msg-7">
+      <div class="bubble">Какие теги сейчас встречаются в активных проектах группы?</div>
+      <div class="meta">15:41</div>
+    </div>
+
+    <div class="msg agent" id="msg-8">
+      <div class="bubble">
+        <div class="md-src" hidden>Вот сводка по группе **IT / DevOps**:
+
+| Проект | Теги | Статус |
+|---|---|---|
+| Обновление Hermes | `hermes`, `vps` | active |
+| Веб-морда для Hermes | `hermes`, `web`, `дизайн` | active |
+| Docker-клетка | `hermes`, `безопасность` | archived |
+
+Итого 4 уникальных тега, `hermes` — в каждом проекте группы.</div>
+        <div class="md-rendered"></div>
+        <button class="copy-btn" title="скопировать как Markdown">⧉ md</button>
+      </div>
+      <div class="meta">15:42 · wormsoft/agent/high</div>
+    </div>
+
+  </div>
+
+  <div class="composer">
+    <div class="compose-attachments" id="composeAttachments"></div>
+    <div class="compose-box">
+      <button class="icon-btn" id="attachBtn" title="прикрепить файлы/папку">📎</button>
+      <textarea id="composeInput" rows="1" placeholder="Написать Hermes… (Ctrl+V — вставить изображение из буфера)"></textarea>
+      <button class="send-btn" title="отправить">➤</button>
+    </div>
+    <div class="compose-hint">вставка изображений из буфера обмена работает прямо здесь — попробуйте Ctrl+V, кликнув в поле ввода</div>
+    <input type="file" id="fileInput" multiple style="display:none">
+  </div>
+</div>
+
+<div class="side">
+  <div class="side-tabs">
+    <button class="on" data-tab="activity">Активность агента</button>
+    <button data-tab="files">Файлы</button>
+  </div>
+
+  <div class="side-pane on" id="pane-activity">
+    <div class="log-line"><span class="t">15:10:02</span><b>Пользователь</b> написал: «Понравился вариант 2…»</div>
+    <div class="log-line model"><span class="t">15:10:02</span>conductor: <b>wormsoft/agent/high</b> начинает обработку</div>
+    <div class="log-line tool"><span class="t">15:10:03</span>project_search_similar — проверка, не дублирует ли задача уже сделанное</div>
+    <div class="log-line"><span class="t">15:10:03</span>совпадений выше порога нет, продолжает как новую правку</div>
+    <div class="log-line tool"><span class="t">15:10:19</span>write_file → /result/project-selector.html</div>
+    <div class="log-line tool"><span class="t">15:10:19</span>project_index_update — переиндексация about.md проекта</div>
+    <div class="log-line"><span class="t">15:10:22</span>history.md обновлён (запись о правке)</div>
+    <div class="log-line"><span class="t">15:10:22</span><b>Готово</b> — ответ отправлен в чат</div>
+    <div class="log-line" style="margin-top:16px;opacity:.6">— ожидание следующего сообщения —</div>
+  </div>
+
+  <div class="side-pane" id="pane-files">
+    <div class="legend">
+      <span><span class="sw" style="background:var(--c-source)"></span>source</span>
+      <span><span class="sw" style="background:var(--c-outer)"></span>outer</span>
+      <span><span class="sw" style="background:var(--c-result)"></span>result</span>
+    </div>
+
+    <div class="file-row"><span class="sw" style="background:var(--c-source)"></span>
+      <div class="info"><div class="fname">hermes-workspace-tree.png</div><div class="fmeta">14:02 · source · 340 KB</div></div>
+      <div class="facts"><button title="скачать">⭳</button><button title="к сообщению" data-jump="msg-1">↩</button></div>
+    </div>
+    <div class="file-row"><span class="sw" style="background:var(--c-source)"></span>
+      <div class="info"><div class="fname">project-folder-table.png</div><div class="fmeta">14:02 · source · 212 KB</div></div>
+      <div class="facts"><button title="скачать">⭳</button><button title="к сообщению" data-jump="msg-1">↩</button></div>
+    </div>
+    <div class="file-row"><span class="sw" style="background:var(--c-outer)"></span>
+      <div class="info"><div class="fname">hermes-plugins-doc-snapshot.md</div><div class="fmeta">14:20 · outer · 6 KB</div></div>
+      <div class="facts"><button title="скачать">⭳</button><button title="к сообщению" data-jump="msg-2">↩</button></div>
+    </div>
+    <div class="file-row"><span class="sw" style="background:var(--c-result)"></span>
+      <div class="info"><div class="fname">hermes-prj-structure.md</div><div class="fmeta">14:38 · result · 11 KB</div></div>
+      <div class="facts"><button title="скачать">⭳</button><button title="к сообщению" data-jump="msg-2">↩</button></div>
+    </div>
+    <div class="file-row"><span class="sw" style="background:var(--c-result)"></span>
+      <div class="info"><div class="fname">variant-1…4 + index.html</div><div class="fmeta">14:52 · result · 5 файлов</div></div>
+      <div class="facts"><button title="скачать">⭳</button><button title="к сообщению" data-jump="msg-4">↩</button></div>
+    </div>
+    <div class="file-row"><span class="sw" style="background:var(--c-result)"></span>
+      <div class="info"><div class="fname">project-selector.html</div><div class="fmeta">15:34 · result · 14 KB</div></div>
+      <div class="facts"><button title="скачать">⭳</button><button title="к сообщению" data-jump="msg-6">↩</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="editor">
+    <div class="editor-head"><span id="editorName">about.md</span><span>txt/md редактор</span></div>
+    <textarea id="editorText"># Название проекта
+Веб-морда для Hermes (замена Matrix)
+
+# Краткое описание
+Спроектировать и собрать собственный веб-интерфейс на HTTPS вместо Matrix —
+селектор проектов + рабочее окно проекта + админка.
+
+# На чём остановились
+Утверждаем интерактивный селектор проектов (project-selector.html).
+
+tags: [hermes, web, дизайн]
+status: active</textarea>
+    <div class="editor-foot">
+      <button class="icon-btn" onclick="document.getElementById('overlay').classList.remove('on')">Закрыть</button>
+      <button class="send-btn" style="width:auto;padding:0 16px" onclick="document.getElementById('overlay').classList.remove('on')">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- minimal markdown renderer (headers, bold, inline code, lists, tables) ---
+function renderMD(src){
+  const lines = src.trim().split('\n');
+  let html = ''; let i = 0;
+  const inline = s => s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  while(i < lines.length){
+    let line = lines[i];
+    if(/^\s*$/.test(line)){ i++; continue; }
+    if(/^#{1,3}\s+/.test(line)){
+      const level = line.match(/^#+/)[0].length;
+      html += `<h${level}>${inline(line.replace(/^#{1,3}\s+/,''))}</h${level}>`;
+      i++; continue;
+    }
+    if(/^\|/.test(line)){
+      const rows = [];
+      while(i < lines.length && /^\|/.test(lines[i])){ rows.push(lines[i]); i++; }
+      const cells = r => r.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      const head = cells(rows[0]);
+      const body = rows.slice(2).map(cells);
+      html += '<table><thead><tr>' + head.map(h=>`<th>${inline(h)}</th>`).join('') + '</tr></thead><tbody>' +
+        body.map(r=>'<tr>'+r.map(c=>`<td>${inline(c)}</td>`).join('')+'</tr>').join('') + '</tbody></table>';
+      continue;
+    }
+    if(/^[-*]\s+/.test(line)){
+      const items = [];
+      while(i < lines.length && /^[-*]\s+/.test(lines[i])){ items.push(lines[i].replace(/^[-*]\s+/,'')); i++; }
+      html += '<ul>' + items.map(it=>`<li>${inline(it)}</li>`).join('') + '</ul>';
+      continue;
+    }
+    const para = [line];
+    i++;
+    while(i < lines.length && !/^\s*$/.test(lines[i]) && !/^#{1,3}\s+/.test(lines[i]) && !/^\|/.test(lines[i]) && !/^[-*]\s+/.test(lines[i])){
+      para.push(lines[i]); i++;
+    }
+    html += `<p>${inline(para.join(' '))}</p>`;
+  }
+  return html;
+}
+
+document.querySelectorAll('.bubble').forEach(b=>{
+  const src = b.querySelector('.md-src');
+  const out = b.querySelector('.md-rendered');
+  if(!src || !out) return;
+  out.innerHTML = renderMD(src.textContent);
+});
+
+document.querySelectorAll('.copy-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const src = btn.parentElement.querySelector('.md-src').textContent.trim();
+    navigator.clipboard.writeText(src).then(()=>{
+      btn.textContent = '✓ скопировано';
+      btn.classList.add('copied');
+      setTimeout(()=>{ btn.textContent = '⧉ md'; btn.classList.remove('copied'); }, 1500);
+    });
+  });
+});
+
+// download helper (demo: placeholder content, real filename + real browser download)
+function downloadPlaceholder(name){
+  const blob = new Blob([`Демонстрационный файл — в реальном проекте здесь настоящее содержимое: ${name}`], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+// chat attachments → click to download
+document.querySelectorAll('.attach-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>downloadPlaceholder(chip.textContent.trim()));
+});
+
+// files tab → download button
+document.querySelectorAll('.file-row .facts button[title="скачать"]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const name = btn.closest('.file-row').querySelector('.fname').textContent.trim();
+    downloadPlaceholder(name);
+  });
+});
+
+// files tab → jump to message in chat, scroll + highlight
+document.querySelectorAll('[data-jump]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    // switch to activity/files pane doesn't matter — chat is always visible
+    const target = document.getElementById(btn.dataset.jump);
+    if(!target) return;
+    target.scrollIntoView({behavior:'smooth', block:'center'});
+    target.classList.remove('highlight-flash'); void target.offsetWidth; // restart animation
+    target.classList.add('highlight-flash');
+    setTimeout(()=>target.classList.remove('highlight-flash'), 1700);
+  });
+});
+
+// tree → editor overlay for .md/.txt-looking files
+document.querySelectorAll('.tree .node.file').forEach(n=>{
+  n.addEventListener('click', ()=>{
+    const name = n.querySelector('.name').textContent;
+    if(name.endsWith('.md') || name.endsWith('.txt')){
+      document.getElementById('editorName').textContent = name;
+      document.getElementById('overlay').classList.add('on');
+    }
+  });
+});
+
+// side panel tabs
+document.querySelectorAll('.side-tabs button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.side-tabs button').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.side-pane').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    document.getElementById('pane-'+b.dataset.tab).classList.add('on');
+  });
+});
+
+// attach button → native file picker → chip preview
+const fileInput = document.getElementById('fileInput');
+document.getElementById('attachBtn').addEventListener('click', ()=>fileInput.click());
+fileInput.addEventListener('change', ()=>{
+  [...fileInput.files].forEach(f=>addThumb(f));
+});
+
+// real clipboard image paste
+document.getElementById('composeInput').addEventListener('paste', (e)=>{
+  const items = e.clipboardData ? e.clipboardData.items : [];
+  for(const it of items){
+    if(it.type.startsWith('image/')){
+      addThumb(it.getAsFile());
+    }
+  }
+});
+
+function addThumb(file){
+  const url = URL.createObjectURL(file);
+  const div = document.createElement('div');
+  div.className = 'thumb';
+  div.style.backgroundImage = `url(${url})`;
+  document.getElementById('composeAttachments').appendChild(div);
+}
+</script>
+</body>
+</html>

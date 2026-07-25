@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes — главная</title>
+<style>
+  :root{
+    --sky:#12172b; --sky-deep:#0c1020; --panel:#1a2038; --panel-2:#212949;
+    --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
+    --violet:#ad9fe6; --teal:#7fc4b2; --dim-star:#727bab;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;min-height:100%}
+  body{
+    background:
+      radial-gradient(1px 1px at 20% 30%, #fff8, transparent),
+      radial-gradient(1px 1px at 65% 15%, #fff6, transparent),
+      radial-gradient(1.5px 1.5px at 82% 60%, #fff9, transparent),
+      radial-gradient(1px 1px at 40% 80%, #fff5, transparent),
+      radial-gradient(1px 1px at 12% 65%, #fff7, transparent),
+      radial-gradient(1.5px 1.5px at 92% 30%, #fff6, transparent),
+      radial-gradient(1px 1px at 75% 85%, #fff6, transparent),
+      radial-gradient(1.5px 1.5px at 6% 20%, #fff7, transparent),
+      linear-gradient(180deg, var(--sky-deep), var(--sky) 45%);
+    background-attachment:fixed;
+    color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    min-height:100vh;
+  }
+
+  .topbar{
+    display:flex;align-items:center;gap:16px;padding:20px 40px;
+    border-bottom:1px solid var(--panel-line);
+  }
+  .topbar .brand{font-family:ui-monospace,Consolas,monospace;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim)}
+  .topbar .brand b{color:var(--text);font-family:Georgia,serif;font-size:16px;font-style:italic;letter-spacing:0;text-transform:none;margin-left:6px}
+
+  .role-switch{
+    margin-left:auto;display:flex;align-items:center;gap:10px;
+    font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--dim-star);
+  }
+  .role-switch select{
+    background:var(--panel);border:1px solid var(--panel-line);color:var(--text-dim);
+    border-radius:6px;padding:5px 8px;font-family:ui-monospace,Consolas,monospace;font-size:11px;
+  }
+
+  .user-pill{display:flex;align-items:center;gap:10px}
+  .avatar{
+    width:32px;height:32px;border-radius:50%;background:var(--panel-2);border:1px solid var(--panel-line);
+    display:flex;align-items:center;justify-content:center;font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--gold);
+  }
+  .user-pill .uname{font-size:13.5px}
+  .logout-btn{
+    font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-dim);
+    background:none;border:1px solid var(--panel-line);border-radius:20px;padding:6px 13px;cursor:pointer;
+  }
+  .logout-btn:hover{color:var(--text);border-color:#e88980}
+
+  main{max-width:1040px;margin:0 auto;padding:56px 40px 80px}
+
+  .greeting{margin-bottom:8px;font-size:32px;font-weight:400;font-style:italic}
+  .subgreeting{color:var(--text-dim);font-size:14.5px;margin-bottom:30px}
+
+  .statline{
+    display:flex;gap:26px;flex-wrap:wrap;margin-bottom:44px;
+    font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-dim);
+  }
+  .statline b{color:var(--gold);font-size:14px}
+  .statline span.sep{opacity:.4}
+
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .tile{
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:16px;
+    padding:26px 24px;text-decoration:none;color:var(--text);position:relative;
+    display:flex;flex-direction:column;gap:10px;transition:border-color .15s ease,transform .15s ease;
+    min-height:150px;
+  }
+  .tile:hover{border-color:var(--violet);transform:translateY(-2px)}
+  .tile.primary{
+    grid-column:span 2;background:linear-gradient(160deg, var(--panel-2), var(--panel));
+    border-color:var(--gold);
+  }
+  .tile .ic{font-size:30px}
+  .tile h3{margin:0;font-size:18px;font-weight:400}
+  .tile p{margin:0;color:var(--text-dim);font-size:13px;line-height:1.5}
+  .tile .soon{
+    position:absolute;top:16px;right:16px;font-family:ui-monospace,Consolas,monospace;
+    font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--dim-star);
+    border:1px solid var(--panel-line);padding:2px 7px;border-radius:20px;
+  }
+  .tile.disabled{opacity:.55;cursor:default}
+  .tile.disabled:hover{border-color:var(--panel-line);transform:none}
+  .tile.admin{border-color:rgba(232,137,128,.5)}
+  .tile.admin:hover{border-color:#e88980}
+
+  [data-role-only="owner"]{display:none}
+  body.role-owner [data-role-only="owner"]{display:flex}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Hermes <b>· главная</b></div>
+  <div class="role-switch">
+    показать как:
+    <select id="roleSelect">
+      <option value="owner">dem (владелец)</option>
+      <option value="member">Глеб (участник)</option>
+    </select>
+  </div>
+  <div class="user-pill">
+    <div class="avatar" id="avatarInitial">D</div>
+    <span class="uname" id="userName">dem</span>
+  </div>
+  <button class="logout-btn" onclick="location.href='login.html'">⏻ Выход</button>
+</div>
+
+<main>
+  <div class="greeting" id="greeting">Добрый вечер, dem</div>
+  <div class="subgreeting">Готовы продолжить один из проектов, или начать что-то новое?</div>
+
+  <div class="statline">
+    <span><b>4</b> активных проекта</span>
+    <span class="sep">·</span>
+    <span><b>1</b> сообщение ждёт ответа</span>
+    <span class="sep">·</span>
+    <span>последняя активность — 2 мин назад</span>
+  </div>
+
+  <div class="tiles">
+    <a class="tile primary" href="project-selector.html">
+      <span class="ic">📂</span>
+      <h3>Работа с проектами</h3>
+      <p>Все группы и темы — найти нужный проект, продолжить разговор или посмотреть, чем всё закончилось.</p>
+    </a>
+
+    <a class="tile" href="project-selector.html?new=all">
+      <span class="ic">💬</span>
+      <h3>Быстрый чат</h3>
+      <p>Начать разговор прямо сейчас, без выбора группы — попадёт в ALL, разберётесь с темой позже.</p>
+    </a>
+
+    <a class="tile" href="project-selector.html#everywhere">
+      <span class="ic">🔭</span>
+      <h3>Искать по всем темам</h3>
+      <p>Сразу в режим «Искать везде» — если помните примерно о чём был проект, но не помните группу.</p>
+    </a>
+
+    <a class="tile disabled" href="#" onclick="return false">
+      <span class="soon">скоро</span>
+      <span class="ic">📖</span>
+      <h3>Как пользоваться Hermes</h3>
+      <p>Инструкция: слэш-команды, параллельные задачи, что означает «waiting on provider».</p>
+    </a>
+
+    <a class="tile disabled" href="#" onclick="return false">
+      <span class="soon">скоро</span>
+      <span class="ic">👤</span>
+      <h3>Профиль и настройки</h3>
+      <p>Смена пароля, уведомления, часовой пояс.</p>
+    </a>
+
+    <a class="tile admin" href="admin.html" data-role-only="owner">
+      <span class="ic">🛠️</span>
+      <h3>Администрирование</h3>
+      <p>Пользователи, метрики VPS и wormsoft.ru, журнал событий.</p>
+    </a>
+  </div>
+</main>
+
+<script>
+const roleSelect = document.getElementById('roleSelect');
+function applyRole(role){
+  document.body.classList.toggle('role-owner', role==='owner');
+  const name = role==='owner' ? 'dem' : 'Глеб';
+  document.getElementById('userName').textContent = name;
+  document.getElementById('avatarInitial').textContent = name[0].toUpperCase();
+  document.getElementById('greeting').textContent = `Добрый вечер, ${name}`;
+}
+roleSelect.addEventListener('change', e=>applyRole(e.target.value));
+applyRole('owner');
+</script>
+</body>
+</html>
