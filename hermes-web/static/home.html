@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes — главная</title>
+<style>
+  :root{
+    --sky:#12172b; --sky-deep:#0c1020; --panel:#1a2038; --panel-2:#212949;
+    --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
+    --violet:#ad9fe6; --teal:#7fc4b2; --dim-star:#727bab;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;min-height:100%}
+  body{
+    background:
+      radial-gradient(1px 1px at 20% 30%, #fff8, transparent),
+      radial-gradient(1px 1px at 65% 15%, #fff6, transparent),
+      radial-gradient(1.5px 1.5px at 82% 60%, #fff9, transparent),
+      radial-gradient(1px 1px at 40% 80%, #fff5, transparent),
+      radial-gradient(1px 1px at 12% 65%, #fff7, transparent),
+      radial-gradient(1.5px 1.5px at 92% 30%, #fff6, transparent),
+      radial-gradient(1px 1px at 75% 85%, #fff6, transparent),
+      radial-gradient(1.5px 1.5px at 6% 20%, #fff7, transparent),
+      linear-gradient(180deg, var(--sky-deep), var(--sky) 45%);
+    background-attachment:fixed;
+    color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    min-height:100vh;
+  }
+  .topbar{display:flex;align-items:center;gap:16px;padding:20px 40px;border-bottom:1px solid var(--panel-line)}
+  .topbar .brand{font-family:ui-monospace,Consolas,monospace;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim)}
+  .topbar .brand b{color:var(--text);font-family:Georgia,serif;font-size:16px;font-style:italic;letter-spacing:0;text-transform:none;margin-left:6px}
+  .user-pill{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .avatar{width:32px;height:32px;border-radius:50%;background:var(--panel-2);border:1px solid var(--panel-line);display:flex;align-items:center;justify-content:center;font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--gold)}
+  .user-pill .uname{font-size:13.5px}
+  .logout-btn{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-dim);background:none;border:1px solid var(--panel-line);border-radius:20px;padding:6px 13px;cursor:pointer}
+  .logout-btn:hover{color:var(--text);border-color:#e88980}
+  main{max-width:1040px;margin:0 auto;padding:56px 40px 80px}
+  .greeting{margin-bottom:8px;font-size:32px;font-weight:400;font-style:italic}
+  .subgreeting{color:var(--text-dim);font-size:14.5px;margin-bottom:30px}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .tile{background:var(--panel);border:1px solid var(--panel-line);border-radius:16px;padding:26px 24px;text-decoration:none;color:var(--text);position:relative;display:flex;flex-direction:column;gap:10px;transition:border-color .15s ease,transform .15s ease;min-height:150px;cursor:pointer}
+  .tile:hover{border-color:var(--violet);transform:translateY(-2px)}
+  .tile.primary{grid-column:span 2;background:linear-gradient(160deg, var(--panel-2), var(--panel));border-color:var(--gold)}
+  .tile .ic{font-size:30px}
+  .tile h3{margin:0;font-size:18px;font-weight:400}
+  .tile p{margin:0;color:var(--text-dim);font-size:13px;line-height:1.5}
+  .tile.disabled{opacity:.55;cursor:default}
+  .tile.disabled:hover{border-color:var(--panel-line);transform:none}
+  .tile .soon{position:absolute;top:16px;right:16px;font-family:ui-monospace,Consolas,monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--dim-star);border:1px solid var(--panel-line);padding:2px 7px;border-radius:20px}
+  [data-role-only="owner"]{display:none}
+  body.role-owner [data-role-only="owner"]{display:flex}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Hermes <b>· главная</b></div>
+  <div class="user-pill">
+    <div class="avatar" id="avatarInitial">·</div>
+    <span class="uname" id="userName">…</span>
+  </div>
+  <button class="logout-btn" id="logoutBtn">⏻ Выход</button>
+</div>
+
+<main>
+  <div class="greeting" id="greeting">Загрузка…</div>
+  <div class="subgreeting">Готовы продолжить один из проектов, или начать что-то новое?</div>
+
+  <div class="tiles">
+    <a class="tile primary disabled" href="#" onclick="return false">
+      <span class="ic">📂</span>
+      <h3>Работа с проектами</h3>
+      <p>Все группы и темы — скоро (следующий срез).</p>
+    </a>
+
+    <a class="tile" id="quickChatTile" href="#">
+      <span class="ic">💬</span>
+      <h3>Быстрый чат</h3>
+      <p>Начать разговор прямо сейчас, без выбора группы — попадёт в ALL, разберётесь с темой позже.</p>
+    </a>
+
+    <a class="tile disabled" href="#" onclick="return false">
+      <span class="soon">скоро</span>
+      <span class="ic">🔭</span>
+      <h3>Искать по всем темам</h3>
+      <p>Скоро — вместе с «Работой с проектами».</p>
+    </a>
+
+    <a class="tile admin disabled" href="#" onclick="return false" data-role-only="owner">
+      <span class="soon">скоро</span>
+      <span class="ic">🛠️</span>
+      <h3>Администрирование</h3>
+      <p>Пользователи, метрики VPS и wormsoft.ru — отдельный срез.</p>
+    </a>
+  </div>
+</main>
+
+<script src="app.js"></script>
+<script>
+(async () => {
+  const me = await requireAuth();
+  if (!me) return;
+  document.getElementById('userName').textContent = me.display_name;
+  document.getElementById('avatarInitial').textContent = me.display_name[0].toUpperCase();
+  document.getElementById('greeting').textContent = `Добрый день, ${me.display_name}`;
+  document.body.classList.toggle('role-owner', me.role === 'owner');
+})();
+
+document.getElementById('logoutBtn').addEventListener('click', logout);
+
+document.getElementById('quickChatTile').addEventListener('click', async (e) => {
+  e.preventDefault();
+  try {
+    const resp = await apiFetch('/api/quick-chat', { method: 'POST' });
+    if (resp.status === 401) { location.href = 'login.html'; return; }
+    if (!resp.ok) { alert('Не удалось начать чат — попробуйте ещё раз'); return; }
+    const body = await resp.json();
+    const params = new URLSearchParams({ id: body.chat_session_id, path: body.project_path || '' });
+    location.href = `chat.html?${params.toString()}`;
+  } catch (err) {
+    alert('Hermes временно недоступен, попробуйте ещё раз');
+  }
+});
+</script>
+</body>
+</html>

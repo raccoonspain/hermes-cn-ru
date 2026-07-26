@@ -17,3 +17,11 @@ __pycache__/
 # Git worktree'ы для изолированной разработки фич (superpowers:using-git-worktrees) —
 # каждый содержит свой .git, не часть истории основного репозитория
 .claude/worktrees/
+
+# hermes-web: локальная SQLite-база (только на сервере/в тестах)
+hermes-web/*.db
+hermes-web/**/*.db
+
+# Рабочие артефакты Subagent-Driven Development (брифы, отчёты, дифф-пакеты
+# для ревью) — только для текущей сессии, не часть истории проекта
+.superpowers/sdd/
