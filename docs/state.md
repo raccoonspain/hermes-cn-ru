@@ -5,8 +5,8 @@
 > вся история — в [changelog.md](./changelog.md).
 > Обновляй после каждого осмысленного шага и **коммить**.
 
-**Последнее обновление:** 2026-07-25
-**Фаза:** Дизайн веб-морды согласован (D-009, 5 экранов в `/result/`) — переходим к бэкенду. Matrix отключён от приоритета (D-008).
+**Последнее обновление:** 2026-07-26
+**Фаза:** Под-проект A бэкенда (Hermes-плагин `project_index`) реализован и выкачен на VPS — переходим к под-проекту B (веб-бэкенд/API). Matrix отключён от приоритета (D-008).
 
 ---
 
@@ -116,7 +116,7 @@ Hermes-плагин `project_index` (embeddings-индекс + `project_move`) �
 метрики VPS/wormsoft.ru для админ-панели. Обновление Hermes (v0.19→latest)
 и per-user Matrix — по-прежнему отдельные, не начатые пункты ниже.
 
-**Под-проект A — статус: спек и план готовы, реализация не начата.**
+**Под-проект A — статус: реализован и выкачен на VPS (2026-07-26).**
 Разведка на реальном сервере (подключились по SSH, свежая сверка кода
 `hermes_cli/plugins.py`/`tools/registry.py`) вскрыла три расхождения с
 исходным `hermes-prj-structure.md`: `numpy` на сервере не установлен
@@ -127,12 +127,22 @@ Hermes-плагин `project_index` (embeddings-индекс + `project_move`) �
 `user` в схеме). Сын получает логин `rost` (Ростислав), не `gleb` — везде
 далее использовать `rost`.
 - Спек: [superpowers/specs/2026-07-25-project-index-plugin-design.md](./superpowers/specs/2026-07-25-project-index-plugin-design.md)
-- План реализации (6 задач, TDD, с точным кодом на каждый файл):
-  [superpowers/plans/2026-07-25-project-index-plugin.md](./superpowers/plans/2026-07-25-project-index-plugin.md)
-- **Продолжить с:** Task 0 плана (локальный venv для тестов) → Task 1
-  (`storage.py`) → ... → Task 6 (деплой на VPS, `hermes plugins enable`,
-  правило в `SOUL.md`, миграция `physics-tasks`, приёмочный тест).
-  Ничего из плана ещё не выполнено.
+- План реализации (6 задач, TDD, с точным кодом на каждый файл, все 6
+  выполнены): [superpowers/plans/2026-07-25-project-index-plugin.md](./superpowers/plans/2026-07-25-project-index-plugin.md)
+- Реализация — ветка `worktree-project-index-plugin` (git worktree
+  `.claude/worktrees/project-index-plugin`), 39 тестов проходят и
+  локально, и интерпретатором сервера. На VPS: плагин включён
+  (`hermes plugins enable project_index`), `workspace/dem/ALL` и
+  `workspace/rost/ALL` созданы, правило переиндексации — в `SOUL.md`,
+  `hermes-gateway.service` перезапущен. Приёмочный тест (5 пунктов
+  спека) пройден живьём через `hermes -z` — детали в
+  [changelog.md](./changelog.md) за 2026-07-26. `physics-tasks/`
+  мигрирован в `workspace/dem/ALL/2026-07-25_physics-tasks` с
+  написанным по факту `about.md`.
+- **Следующий шаг:** влить ветку `worktree-project-index-plugin` в
+  `main` (superpowers:finishing-a-development-branch), затем начать
+  под-проект B — веб-бэкенд/API (данные Групп/Проектов, авторизация,
+  чат поверх макетов D-009).
 
 ## Следующие шаги
 

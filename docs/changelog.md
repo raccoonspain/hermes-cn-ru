@@ -21,6 +21,43 @@
 
 <!-- Новые записи добавляй СВЕРХУ, сразу под этой строкой -->
 
+## 2026-07-26 — Hermes-плагин project_index реализован и выкачен на VPS
+- Реализовали по плану (TDD, 6 задач): слой хранения `storage.py`
+  (SQLite + косинус чистым Python, без numpy), клиент wormsoft.ru
+  `embeddings.py` (политика ретраев по матрице ошибок из
+  `docs/wormsoft-api.md`), бизнес-логику `core.py` (парсинг `about.md`,
+  валидация путей, `index_update`/`search_similar`/`move_project`/
+  `reindex_all`), регистрацию трёх agent-facing инструментов в
+  `__init__.py` (`project_index_update`, `project_search_similar`,
+  `project_move`) + `plugin.yaml` + CLI `reindex.py`. 39 тестов, все
+  проходят локально и повторно — интерпретатором сервера (Python 3.11,
+  requests 2.33.0, PyYAML 6.0.3, тем же venv, что использует Hermes).
+- Выкатили на VPS: скопировали пакет в `~/.hermes/plugins/project_index/`,
+  включили через `hermes plugins enable project_index
+  --no-allow-tool-override`, создали `workspace/dem/ALL` и
+  `workspace/rost/ALL`, дописали правило в `SOUL.md` (переиндексировать
+  после правки `about.md`), перезапустили `hermes-gateway.service`.
+- Приёмочный тест — все 5 пунктов спека пройдены через живой `hermes -z`
+  на реальном сервере: `project_index_update` (запись появилась в
+  `index.db` с верными title/status), `project_search_similar` (реальный
+  вызов wormsoft.ru, косинус 0.84 на точном совпадении), `project_move`
+  без коллизии (перенос из `ALL` корректно снял дата-префикс), `project_move`
+  с коллизией (жёсткая ошибка без авто-суффикса — но с первой попытки
+  модель сама обошла коллизию, выбрав свободное имя вместо ошибки; это
+  особенность формулировки промпта агенту, не баг плагина — при явно
+  зафиксированном `new_name` инструмент правильно вернул ошибку и ничего
+  не тронул на диске), поведение без `WORMSOFT_API_KEY` (`search_similar`
+  бросает `ProjectIndexError`, проверено напрямую через `core.py`, не
+  трогая боевой `.env`).
+- Мигрировали существующий `physics-tasks/` (12 решённых задач по
+  кинематике + `index.html`/`style.css`) в новую структуру: написали
+  `about.md` по реальному содержимому папки, перенесли в
+  `workspace/dem/ALL/2026-07-25_physics-tasks`, проиндексировали.
+- Зачем: закрывает под-проект A бэкенда (embeddings-индекс + организация
+  папок проектов) — следующий шаг теперь под-проект B, веб-бэкенд/API.
+- Связанные документы: [superpowers/specs/2026-07-25-project-index-plugin-design.md](./superpowers/specs/2026-07-25-project-index-plugin-design.md),
+  [superpowers/plans/2026-07-25-project-index-plugin.md](./superpowers/plans/2026-07-25-project-index-plugin.md)
+
 ## 2026-07-25 — Спек и план для Hermes-плагина project_index (под-проект A бэкенда)
 - Брейнсторм по под-проекту A бэкенда (из трёх: A. Hermes-плагин, B.
   веб-бэкенд/API, C. метрики для админки) — начали с A, так как B и C
