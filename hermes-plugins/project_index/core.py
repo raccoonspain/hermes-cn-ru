@@ -160,3 +160,116 @@ def search_similar(
     if not results:
         return {"results": [], "message": "ничего не проиндексировано или похожего не найдено"}
     return {"results": results, "message": ""}
+
+
+def _strip_date_prefix(name: str) -> str:
+    return _DATE_PREFIX_RE.sub("", name)
+
+
+def _add_date_prefix(name: str) -> str:
+    if _DATE_PREFIX_RE.match(name):
+        return name
+    today = datetime.date.today().isoformat()
+    return f"{today}_{name}"
+
+
+def _rewrite_title(project_dir: str, new_title: str) -> None:
+    about_path = _about_md_path(project_dir)
+    with open(about_path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+
+    pattern = re.compile(
+        rf"(#\s+{re.escape(_TITLE_SECTION)}\s*\n)(.*?)(\n#|\Z)",
+        re.DOTALL,
+    )
+    updated, count = pattern.subn(lambda m: m.group(1) + new_title + m.group(3), text, count=1)
+    if count == 0:
+        raise ProjectIndexError(f"about.md: не удалось найти секцию '{_TITLE_SECTION}' для переименования")
+
+    with open(about_path, "w", encoding="utf-8") as fh:
+        fh.write(updated)
+
+
+def move_project(
+    user: str,
+    project_path: str,
+    new_group: Optional[str] = None,
+    new_name: Optional[str] = None,
+    workspace_root: str = WORKSPACE_ROOT,
+    db_path: str = DB_PATH,
+    api_key: Optional[str] = None,
+) -> dict:
+    root = os.path.realpath(workspace_root)
+    old_path = resolve_project_path(user, project_path, workspace_root)
+    if not os.path.isdir(old_path):
+        raise ProjectIndexError(f"проект не найден: {old_path}")
+
+    old_group_dir = os.path.dirname(old_path)
+    old_leaf = os.path.basename(old_path)
+    old_group_name = os.path.basename(old_group_dir)
+    leaving_all = old_group_name == "ALL"
+
+    target_group = new_group if new_group is not None else old_group_name
+    entering_all = target_group == "ALL"
+
+    leaf = new_name if new_name else old_leaf
+    if leaving_all and not entering_all:
+        leaf = _strip_date_prefix(leaf)
+    elif entering_all and not leaving_all:
+        leaf = _add_date_prefix(leaf)
+
+    new_group_dir = os.path.join(root, user, target_group)
+    new_path = os.path.join(new_group_dir, leaf)
+
+    if new_path == old_path:
+        raise ProjectIndexError("не указаны new_group или new_name — нечего переносить")
+    if os.path.exists(new_path):
+        raise ProjectIndexError(f"в группе '{target_group}' уже есть проект с именем '{leaf}'")
+
+    os.makedirs(new_group_dir, exist_ok=True)
+    shutil.move(old_path, new_path)
+
+    if new_name:
+        _rewrite_title(new_path, new_name)
+
+    conn = storage.get_connection(db_path)
+    try:
+        storage.rename_path(conn, old_path, new_path)
+    finally:
+        conn.close()
+
+    index_result = index_update(
+        user, os.path.relpath(new_path, root), workspace_root, db_path, api_key
+    )
+
+    return {
+        "old_path": old_path,
+        "new_path": new_path,
+        "indexed": index_result["indexed"],
+        "session_restart_required": True,
+    }
+
+
+def reindex_all(
+    user: str,
+    workspace_root: str = WORKSPACE_ROOT,
+    db_path: str = DB_PATH,
+    api_key: Optional[str] = None,
+) -> dict:
+    user_root = os.path.join(os.path.realpath(workspace_root), user)
+    if not os.path.isdir(user_root):
+        raise ProjectIndexError(f"пространство пользователя не найдено: {user_root}")
+
+    indexed = []
+    failed = []
+    for dirpath, _dirnames, filenames in os.walk(user_root):
+        if "about.md" not in filenames:
+            continue
+        rel_path = os.path.relpath(dirpath, os.path.realpath(workspace_root))
+        try:
+            result = index_update(user, rel_path, workspace_root, db_path, api_key)
+            indexed.append(result["path"])
+        except ProjectIndexError as exc:
+            failed.append({"path": dirpath, "error": str(exc)})
+
+    return {"indexed": indexed, "failed": failed}

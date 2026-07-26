@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from project_index import core
@@ -146,3 +148,86 @@ def test_search_similar_wormsoft_down_returns_empty_with_message(tmp_path, monke
     )
     assert result["results"] == []
     assert "недоступен" in result["message"]
+
+
+def test_move_project_between_groups_with_rename(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/2026-01-01_old-name")
+    db_path = str(tmp_path / "index.db")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
+
+    result = core.move_project(
+        "dem", "dem/ALL/2026-01-01_old-name",
+        new_group="1С", new_name="Новое имя",
+        workspace_root=str(tmp_path), db_path=db_path,
+    )
+
+    assert not os.path.exists(str(tmp_path / "dem" / "ALL" / "2026-01-01_old-name"))
+    new_dir = tmp_path / "dem" / "1С" / "Новое имя"
+    assert new_dir.is_dir()
+    about_text = (new_dir / "about.md").read_text(encoding="utf-8")
+    assert "Новое имя" in about_text
+    assert result["session_restart_required"] is True
+    assert result["new_path"] == str(new_dir)
+
+
+def test_move_project_into_all_adds_date_prefix(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/1С/накладные")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
+
+    result = core.move_project(
+        "dem", "dem/1С/накладные", new_group="ALL",
+        workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"),
+    )
+    leaf = os.path.basename(result["new_path"])
+    assert core._DATE_PREFIX_RE.match(leaf)
+
+
+def test_move_project_out_of_all_strips_date_prefix(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/2026-01-01_накладные")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
+
+    result = core.move_project(
+        "dem", "dem/ALL/2026-01-01_накладные", new_group="1С",
+        workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"),
+    )
+    assert os.path.basename(result["new_path"]) == "накладные"
+
+
+def test_move_project_collision_raises_and_does_not_move(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/a")
+    _write_project(tmp_path, "dem/1С/a")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
+
+    with pytest.raises(core.ProjectIndexError):
+        core.move_project(
+            "dem", "dem/ALL/a", new_group="1С",
+            workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"),
+        )
+    assert os.path.isdir(str(tmp_path / "dem" / "ALL" / "a"))
+
+
+def test_move_project_noop_call_raises(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/1С/проект")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
+
+    with pytest.raises(core.ProjectIndexError):
+        core.move_project(
+            "dem", "dem/1С/проект",
+            workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"),
+        )
+
+
+def test_reindex_all_indexes_every_project_with_about_md(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/a")
+    _write_project(tmp_path, "dem/1С/b")
+    (tmp_path / "dem" / "ALL" / "empty").mkdir(parents=True)
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: [0.1])
+
+    result = core.reindex_all("dem", workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"))
+    assert len(result["indexed"]) == 2
+    assert result["failed"] == []
+
+
+def test_reindex_all_missing_user_dir_raises(tmp_path):
+    with pytest.raises(core.ProjectIndexError):
+        core.reindex_all("nobody", workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"))
