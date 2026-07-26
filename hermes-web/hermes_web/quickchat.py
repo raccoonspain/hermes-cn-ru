@@ -5,10 +5,9 @@ project_index — уже задеплоенный Hermes-плагин (см.
 docs/superpowers/specs/2026-07-25-project-index-plugin-design.md). Мы
 импортируем его core-модуль напрямую: тот спроектирован именно для этого
 ("future caller — the planned web backend — can load this module
-directly"). PROJECT_INDEX_PLUGIN_DIR добавляется на sys.path тем, кто
-собирает Config (см. run.py в Task 5 / conftest.py в тестах), не этим
-модулем — чтобы quickchat.py не был жёстко привязан к переменным
-окружения на верхнем уровне импорта.
+directly"). При импорте этого модуля мы сами читаем PROJECT_INDEX_PLUGIN_DIR
+из окружения и добавляем его на sys.path, если он задан — это происходит на
+уровне импорта, ещё до создания Config.
 """
 from __future__ import annotations
 

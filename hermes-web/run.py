@@ -7,6 +7,8 @@
                               index_update сам деградирует без него)
   PROJECT_INDEX_PLUGIN_DIR — путь к каталогу с пакетом project_index
                               (на сервере: /home/hermes/.hermes/plugins)
+                              Потребляется на уровне импорта hermes_web.quickchat,
+                              не прочитывается прямо этим скриптом.
   HERMES_WEB_DB_PATH       — путь к hermes-web.db (по умолчанию рядом с этим файлом)
   HERMES_WEB_HOST/PORT     — адрес прослушивания (по умолчанию 127.0.0.1:8643)
   HERMES_WEB_COOKIE_SECURE — "true"/"false" (по умолчанию true; false — только
