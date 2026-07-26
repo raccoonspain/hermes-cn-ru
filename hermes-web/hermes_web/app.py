@@ -12,7 +12,7 @@ import time
 import aiohttp
 from aiohttp import web
 
-from . import auth, hermes_client, quickchat, storage
+from . import auth, hermes_client, projects, quickchat, storage
 
 COOKIE_NAME = "hermes_web_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 дней
@@ -157,6 +157,89 @@ async def handle_get_messages(request: web.Request) -> web.Response:
     return web.json_response({"data": messages})
 
 
+async def handle_list_groups(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    groups = projects.list_groups(user["username"], request.app["db"], request.app["quickchat_config"])
+    return web.json_response({"groups": groups})
+
+
+async def handle_create_group(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    name = str(body.get("name", "")).strip()
+    emoji = str(body.get("emoji", ""))
+    if not name:
+        return web.json_response({"error": "name is required"}, status=400)
+    result = projects.create_group(user["username"], name, emoji, request.app["db"], request.app["quickchat_config"])
+    return web.json_response(result)
+
+
+async def handle_update_group(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    slug = request.match_info["slug"]
+    body = await request.json()
+    try:
+        result = projects.update_group(
+            user["username"], slug, request.app["db"], request.app["quickchat_config"],
+            display_name=body.get("display_name"), emoji=body.get("emoji"), pinned=body.get("pinned"),
+        )
+    except projects.ProjectsError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    return web.json_response(result)
+
+
+async def handle_list_projects(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    group = request.query.get("group", "*")
+    since = request.query.get("since", "month")
+    status = request.query.get("status", "active")
+    try:
+        result = projects.list_projects(
+            user["username"], request.app["db"], request.app["quickchat_config"],
+            group=group, since=since, status=status,
+        )
+    except projects.ProjectsError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response({"projects": result})
+
+
+async def handle_project_detail(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    path = request.query.get("path", "")
+    try:
+        detail = projects.get_project_detail(user["username"], path, request.app["quickchat_config"])
+    except projects.project_index_core.ProjectIndexError:
+        return web.json_response({"error": "not found"}, status=404)
+    return web.json_response(detail)
+
+
+async def handle_search_projects(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    query = str(body.get("query", ""))
+    try:
+        result = await projects.search_projects(user["username"], query, request.app["quickchat_config"])
+    except projects.project_index_core.ProjectIndexError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(result)
+
+
+async def handle_move_project(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    path = str(body.get("path", ""))
+    new_group = body.get("new_group")
+    new_name = body.get("new_name")
+    try:
+        result = await projects.move_project(
+            user["username"], path, request.app["quickchat_config"], request.app["db"],
+            new_group=new_group, new_name=new_name,
+        )
+    except projects.project_index_core.ProjectIndexError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(result)
+
+
 async def _on_startup(app: web.Application) -> None:
     # aiohttp.ClientSession() requires a running event loop (aiohttp >= 4-style
     # behaviour, already true in 3.14) — create_app() itself is a plain sync
@@ -194,6 +277,13 @@ def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secur
     app.router.add_post("/api/quick-chat", handle_quick_chat)
     app.router.add_post("/api/chat/{chat_session_id}/send", handle_send_message)
     app.router.add_get("/api/chat/{chat_session_id}/messages", handle_get_messages)
+    app.router.add_get("/api/groups", handle_list_groups)
+    app.router.add_post("/api/groups", handle_create_group)
+    app.router.add_put("/api/groups/{slug}", handle_update_group)
+    app.router.add_get("/api/projects", handle_list_projects)
+    app.router.add_get("/api/projects/detail", handle_project_detail)
+    app.router.add_post("/api/projects/search", handle_search_projects)
+    app.router.add_post("/api/projects/move", handle_move_project)
     app.router.add_get("/", handle_root)
     app.router.add_static("/", static_dir, show_index=False)
     return app

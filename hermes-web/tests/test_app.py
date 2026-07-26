@@ -3,7 +3,7 @@ import json
 import aiohttp
 import pytest
 
-from hermes_web import auth, hermes_client, quickchat, storage
+from hermes_web import auth, hermes_client, projects, quickchat, storage
 from hermes_web.app import create_app
 
 
@@ -204,3 +204,156 @@ async def test_get_messages_cross_user_returns_404(aiohttp_client, app_and_conn)
     await client.post("/login", json={"username": "rost", "password": "secret456"})
     resp = await client.get("/api/chat/dem-chat/messages")
     assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_list_groups_requires_auth(aiohttp_client, app_and_conn):
+    client = await aiohttp_client(app_and_conn)
+    resp = await client.get("/api/groups")
+    assert resp.status == 401
+
+
+@pytest.mark.asyncio
+async def test_list_groups_returns_groups_from_projects_module(aiohttp_client, app_and_conn, monkeypatch):
+    def fake_list_groups(user, db_conn, config):
+        assert user == "dem"
+        return [{"slug": "ALL", "display_name": "ALL", "emoji": "", "pinned": False, "project_count": 0}]
+
+    monkeypatch.setattr("hermes_web.app.projects.list_groups", fake_list_groups)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/groups")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body == {"groups": [{"slug": "ALL", "display_name": "ALL", "emoji": "", "pinned": False, "project_count": 0}]}
+
+
+@pytest.mark.asyncio
+async def test_create_group_requires_name(aiohttp_client, app_and_conn):
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/groups", json={"name": "", "emoji": "🏠"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_create_group_delegates_to_projects_module(aiohttp_client, app_and_conn, monkeypatch):
+    def fake_create_group(user, name, emoji, db_conn, config):
+        return {"slug": "dom-i-remont", "display_name": name, "emoji": emoji, "pinned": False, "project_count": 0}
+
+    monkeypatch.setattr("hermes_web.app.projects.create_group", fake_create_group)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/groups", json={"name": "Дом и ремонт", "emoji": "🏠"})
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["slug"] == "dom-i-remont"
+
+
+@pytest.mark.asyncio
+async def test_update_group_unknown_slug_returns_404(aiohttp_client, app_and_conn, monkeypatch):
+    def fake_update_group(user, slug, db_conn, config, display_name=None, emoji=None, pinned=None):
+        raise projects.ProjectsError("неизвестная группа: nope")
+
+    monkeypatch.setattr("hermes_web.app.projects.update_group", fake_update_group)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.put("/api/groups/nope", json={"display_name": "x"})
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_list_projects_uses_default_filters_when_no_query_params(aiohttp_client, app_and_conn, monkeypatch):
+    captured = {}
+
+    def fake_list_projects(user, db_conn, config, group="*", since="month", status="active"):
+        captured.update(user=user, group=group, since=since, status=status)
+        return []
+
+    monkeypatch.setattr("hermes_web.app.projects.list_projects", fake_list_projects)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/projects")
+    assert resp.status == 200
+    assert captured == {"user": "dem", "group": "*", "since": "month", "status": "active"}
+
+
+@pytest.mark.asyncio
+async def test_list_projects_forwards_explicit_query_params(aiohttp_client, app_and_conn, monkeypatch):
+    captured = {}
+
+    def fake_list_projects(user, db_conn, config, group="*", since="month", status="active"):
+        captured.update(group=group, since=since, status=status)
+        return []
+
+    monkeypatch.setattr("hermes_web.app.projects.list_projects", fake_list_projects)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    await client.get("/api/projects?group=ALL&since=year&status=all")
+    assert captured == {"group": "ALL", "since": "year", "status": "all"}
+
+
+@pytest.mark.asyncio
+async def test_list_projects_unknown_since_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    def fake_list_projects(user, db_conn, config, group="*", since="month", status="active"):
+        raise projects.ProjectsError("неизвестный диапазон времени: decade")
+
+    monkeypatch.setattr("hermes_web.app.projects.list_projects", fake_list_projects)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/projects?since=decade")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_project_detail_not_found_returns_404(aiohttp_client, app_and_conn, monkeypatch):
+    def fake_get_project_detail(user, path, config):
+        raise projects.project_index_core.ProjectIndexError("not found")
+
+    monkeypatch.setattr("hermes_web.app.projects.get_project_detail", fake_get_project_detail)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/projects/detail?path=dem/ALL/x")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_search_projects_returns_results(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_search_projects(user, query, config):
+        assert query == "гараж"
+        return {"results": [{"path": "/p"}], "message": ""}
+
+    monkeypatch.setattr("hermes_web.app.projects.search_projects", fake_search_projects)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/search", json={"query": "гараж"})
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["results"] == [{"path": "/p"}]
+
+
+@pytest.mark.asyncio
+async def test_move_project_success(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_move_project(user, path, config, db_conn, new_group=None, new_name=None):
+        assert new_group == "1С"
+        return {"old_path": "/old", "new_path": "/new", "indexed": True, "session_restart_required": True}
+
+    monkeypatch.setattr("hermes_web.app.projects.move_project", fake_move_project)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/move", json={"path": "dem/ALL/a", "new_group": "1С"})
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["new_path"] == "/new"
+
+
+@pytest.mark.asyncio
+async def test_move_project_collision_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_move_project(user, path, config, db_conn, new_group=None, new_name=None):
+        raise projects.project_index_core.ProjectIndexError("в группе уже есть проект с таким именем")
+
+    monkeypatch.setattr("hermes_web.app.projects.move_project", fake_move_project)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/move", json={"path": "dem/ALL/a", "new_group": "1С"})
+    assert resp.status == 400
