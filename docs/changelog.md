@@ -21,6 +21,60 @@
 
 <!-- Новые записи добавляй СВЕРХУ, сразу под этой строкой -->
 
+## 2026-07-26 — hermes-web: авторизация + «Быстрый чат» реализованы и выкачены на hermes.blackboxbegin.space
+- Реализовали по плану (TDD, Subagent-Driven Development, 9 задач):
+  пакет `hermes-web/hermes_web/` — слой хранения `storage.py` (SQLite:
+  `users`/`web_sessions`/`chat_sessions`), аутентификация `auth.py`
+  (argon2, случайные куки-токены, in-memory rate limiter 5/5мин на
+  `ip+username`), клиент Hermes API server `hermes_client.py` (сессии,
+  SSE-чат, история), бизнес-логика «Быстрого чата» `quickchat.py`
+  (создаёт проект в `ALL` через уже задеплоенный `project_index.core`
+  напрямую, заводит Hermes-сессию, проксирует сообщения), веб-приложение
+  `app.py` (aiohttp: login/logout/me/quick-chat/send/messages, auth
+  middleware, статика), сид пользователей `seed_users.py` + entrypoint
+  `run.py`, фронтенд (`login.html`/`home.html` — доработанные макеты
+  «Созвездие», новый `chat.html`, `app.js` с SSE-парсером). 35 тестов,
+  все проходят и локально, и интерпретатором сервера.
+- Каждая из 9 задач прошла отдельное ревью (spec-compliance + качество)
+  через subagent-driven-development; несколько раундов фикс-луп: Task 3
+  (тест не проверял Authorization-заголовок — было скопировано из брифа
+  дословно), Task 5 (три обоснованных отклонения от кода брифа: дефолт
+  `cookie_secure`, `ClientSession` перенесён в `on_startup` из-за
+  версия-специфичного бага aiohttp 3.14.1, ослабление guard в
+  `handle_send_message` — исправление реального самопротиворечия между
+  тестом и кодом в самом брифе, не ошибка исполнителя), Task 6
+  (устаревший докстринг про `PROJECT_INDEX_PLUGIN_DIR` — не баг, просто
+  неточное описание того, что переменная читается транзитивно через
+  импорт `quickchat.py`), Task 7 (добавлены редиректы на `login.html`
+  при истёкшей сессии на всех API-вызовах, не только при загрузке
+  страницы, плюс `try/catch` на сетевые ошибки и реальный `project_path`
+  вместо UUID в `chat.html`).
+- Выкатили на VPS: включили платформу Hermes `api_server` (`API_SERVER_KEY`
+  в `.env`, слушает `127.0.0.1:8642`), скопировали `hermes-web/` rsync'ом
+  (без git, без `tests/`) в `~/hermes-web/`, доставили недостающие
+  зависимости в общий venv `hermes-agent` (`argon2-cffi`, `pytest`,
+  `pytest-aiohttp` — `aiohttp` не трогали, это общая зависимость самого
+  гейтвея), подняли `hermes-web.service` (systemd user-юнит, слушает
+  `127.0.0.1:8643`), засеяли реальных пользователей `dem` (owner) и
+  `rost` (participant) с сгенерированными случайными паролями (переданы
+  заказчику отдельно, не в этом репозитории), поставили Caddy и настроили
+  реверс-прокси `hermes.blackboxbegin.space` → `127.0.0.1:8643`
+  (автоматический TLS сертификат Let's Encrypt получен сразу), включили
+  `ufw` (разрешены только 22/80/443).
+- Приёмочный тест пройден на реальном публичном домене: вход по
+  логину/паролю (`POST /login` → 200, кука установлена), «Быстрый чат»
+  создал реальный проект в `workspace/dem/ALL/...` с `about.md`, отправка
+  сообщения агенту дала настоящий стриминг SSE (`assistant.delta` →
+  `assistant.completed` → `done`) с осмысленным ответом. Тестовый проект
+  удалён после приёмки.
+- Зачем: закрывает срез 1+2 под-проекта B бэкенда (авторизация + минимальный
+  чат с Hermes через браузер на собственном домене, без Matrix) — реализует
+  пункт брифа про веб-морду. Следующий шаг — срез 3 (Группы/Проекты,
+  навигация, `project-workspace.html`) и админ-панель.
+- Связанные документы:
+  [superpowers/specs/2026-07-26-web-backend-auth-chat-design.md](./superpowers/specs/2026-07-26-web-backend-auth-chat-design.md),
+  [superpowers/plans/2026-07-26-web-backend-auth-chat.md](./superpowers/plans/2026-07-26-web-backend-auth-chat.md)
+
 ## 2026-07-26 — Hermes-плагин project_index реализован и выкачен на VPS
 - Реализовали по плану (TDD, 6 задач): слой хранения `storage.py`
   (SQLite + косинус чистым Python, без numpy), клиент wormsoft.ru

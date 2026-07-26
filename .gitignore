@@ -13,3 +13,7 @@ data/
 # Питон-мусор (плагин project_index)
 __pycache__/
 *.pyc
+
+# Git worktree'ы для изолированной разработки фич (superpowers:using-git-worktrees) —
+# каждый содержит свой .git, не часть истории основного репозитория
+.claude/worktrees/
