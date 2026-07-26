@@ -1,0 +1,11 @@
+name: project_index
+version: "1.0.0"
+description: >-
+  Per-user индекс проектов для архитектуры "сессия это проект":
+  embeddings-поиск (project_search_similar) и организация папок
+  (project_index_update, project_move) над workspace/<user>/{ALL,<Группа>}/<Проект>.
+  См. docs/hermes-prj-structure.md и docs/superpowers/specs/2026-07-25-project-index-plugin-design.md
+  в репозитории hermes-cn-ru.
+author: "hermes-cn-ru project"
+requires_env:
+  - WORMSOFT_API_KEY
