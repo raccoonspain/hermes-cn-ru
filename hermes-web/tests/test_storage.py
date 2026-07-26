@@ -91,6 +91,14 @@ def test_upsert_group_meta_updates_existing_row(tmp_path):
     assert bool(row["pinned"]) is True
 
 
+def test_upsert_group_meta_preserves_created_at_on_conflict(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    storage.upsert_group_meta(conn, "dem", "it", "IT", "🖥️", False, created_at="2026-01-01T00:00:00")
+    storage.upsert_group_meta(conn, "dem", "it", "IT / DevOps", "🖥️", True, created_at="2099-01-01T00:00:00")
+    row = storage.get_group_meta(conn, "dem", "it")
+    assert row["created_at"] == "2026-01-01T00:00:00"
+
+
 def test_list_group_meta_scoped_to_user(tmp_path):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     storage.upsert_group_meta(conn, "dem", "it", "IT", "🖥️", False, created_at="t")
