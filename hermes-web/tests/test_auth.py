@@ -46,3 +46,36 @@ def test_rate_limiter_keys_are_independent():
     assert limiter.allow("user-a", now=1000.0) is True
     assert limiter.allow("user-b", now=1000.0) is True
     assert limiter.allow("user-a", now=1000.0) is False
+
+
+def test_rate_limiter_prune_drops_key_once_its_deque_is_fully_expired():
+    # Внутренняя реализация (_attempts, _prune) — сознательный компромисс:
+    # это тест на ограничение памяти (finding 5 финального ревью), а не на
+    # публичное поведение allow(). allow() сама всегда дописывает свежую
+    # попытку сразу после прополки (если не заблокировано), так что снаружи
+    # через allow() невозможно застать словарь с уже опустевшим — но ещё не
+    # удалённым — deque; проверяем прополку напрямую через _prune().
+    limiter = auth.RateLimiter(max_attempts=5, window_seconds=300)
+    limiter.allow("1.2.3.4:ghost-user", now=1000.0)
+    assert "1.2.3.4:ghost-user" in limiter._attempts
+
+    # Окно истекло, и ключ больше никто не запрашивал (типичная спрей-атака —
+    # атакующий не возвращается к уже использованным именам). Прополка должна
+    # убрать опустевшую запись из словаря, а не оставить пустой deque висеть
+    # там бесконечно.
+    limiter._prune("1.2.3.4:ghost-user", now=1301.0)
+    assert "1.2.3.4:ghost-user" not in limiter._attempts
+
+
+def test_rate_limiter_hard_cap_clears_dict_instead_of_growing_unbounded():
+    # Реалистичная атака: множество РАЗНЫХ ключей (ip:username), каждый
+    # используется ровно один раз — их deque никогда не допрунивается через
+    # собственный повторный allow(), поэтому единственная граница памяти —
+    # жёсткий потолок числа ключей (defense-in-depth поверх _prune()).
+    limiter = auth.RateLimiter(max_attempts=5, window_seconds=300)
+    limiter._HARD_CAP_KEYS = 100  # маленький потолок, чтобы не гонять 10k итераций
+
+    for i in range(150):
+        limiter.allow(f"1.2.3.4:spray-user-{i}", now=1000.0)
+
+    assert len(limiter._attempts) <= 100

@@ -1,5 +1,8 @@
+import asyncio
 import os
 import sys
+import threading
+import time
 
 import pytest
 
@@ -52,6 +55,72 @@ async def test_create_quick_chat_creates_project_and_hermes_session(tmp_path, mo
         result["project_path"],
     )
     assert indexed["title"].startswith("Новый разговор")
+
+
+@pytest.mark.asyncio
+async def test_create_quick_chat_leaves_no_orphan_project_when_hermes_session_fails(tmp_path, monkeypatch):
+    # finding 7 финального ревью: раньше каталог проекта + about.md +
+    # запись в project_index заводились ДО hermes_client.create_session —
+    # падение (Hermes лежит, самый реалистичный сценарий сбоя) оставляло
+    # "призрачный" проект без чата, и каждый ретрай в даунтайм добавлял ещё
+    # один. create_session должен идти первым.
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    async def failing_create_session(http_session, base_url, api_key, session_id):
+        raise hermes_client.HermesClientError("create_session failed: 503 Service Unavailable")
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", failing_create_session)
+
+    with pytest.raises(hermes_client.HermesClientError):
+        await quickchat.create_quick_chat(conn, http_session=None, config=config, user="dem")
+
+    all_dir = os.path.join(str(tmp_path / "workspace"), "dem", "ALL")
+    assert not os.path.isdir(all_dir) or os.listdir(all_dir) == []
+
+
+@pytest.mark.asyncio
+async def test_create_quick_chat_runs_index_update_without_blocking_event_loop(tmp_path, monkeypatch):
+    # finding 4 финального ревью: project_index_core.index_update может
+    # дойти до синхронного requests.post (эмбеддинг через wormsoft.ru, до
+    # ~44с в худшем случае) прямо внутри однопоточного event loop aiohttp —
+    # это замораживает ВЕСЬ процесс, а не только этот запрос. Проверяем два
+    # свойства: (1) index_update реально выполняется в другом потоке, и
+    # (2) пока он "блокируется" (тут — sleep), event loop остаётся
+    # отзывчивым — параллельная корутина продолжает тикать.
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    call_thread_name = {}
+
+    def fake_index_update(user, project_path, **kwargs):
+        call_thread_name["name"] = threading.current_thread().name
+        time.sleep(0.2)  # имитирует блокирующий HTTP-вызов эмбеддинга
+        return {"path": project_path, "indexed": False, "message": "ok"}
+
+    monkeypatch.setattr(quickchat.project_index_core, "index_update", fake_index_update)
+
+    ticks = []
+
+    async def ticker():
+        for i in range(10):
+            await asyncio.sleep(0.02)
+            ticks.append(i)
+
+    ticker_task = asyncio.create_task(ticker())
+    await quickchat.create_quick_chat(conn, http_session=None, config=config, user="dem")
+    await ticker_task
+
+    assert call_thread_name["name"] != threading.current_thread().name
+    # Если бы index_update блокировал event loop напрямую, ticker не успел
+    # бы сделать почти ни одного тика за те же 0.2с — он получил бы
+    # управление только после того, как index_update целиком завершится.
+    assert len(ticks) >= 5
 
 
 @pytest.mark.asyncio

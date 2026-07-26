@@ -11,7 +11,9 @@ directly"). При импорте этого модуля мы сами чита
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
+import functools
 import os
 import sys
 import time
@@ -79,15 +81,28 @@ async def create_quick_chat(db_conn, http_session, config: Config, user: str) ->
     project_rel_path = os.path.join(user, "ALL", slug)
     project_abs_path = os.path.join(_workspace_root(config), user, "ALL", slug)
 
+    # create_session — единственный шаг здесь, который реалистично может
+    # упасть (сеть/Hermes лежит), поэтому идёт первым: если он упадёт, на
+    # диске/в project_index не остаётся "призрачного" проекта без сессии
+    # чата. При падении на любом из следующих шагов orphan-риска нет — это
+    # локальные файловые/БД операции.
+    hermes_session_id = f"web_{uuid.uuid4().hex}"
+    await hermes_client.create_session(http_session, config.hermes_base_url, config.hermes_api_key, hermes_session_id)
+
     os.makedirs(project_abs_path, exist_ok=True)
     now_label = datetime.datetime.now().strftime("%H:%M")
     with open(os.path.join(project_abs_path, "about.md"), "w", encoding="utf-8") as fh:
         fh.write(ABOUT_MD_PLACEHOLDER.format(title=f"Новый разговор {now_label}"))
 
-    index_result = project_index_core.index_update(user, project_rel_path, **_project_index_kwargs(config))
-
-    hermes_session_id = f"web_{uuid.uuid4().hex}"
-    await hermes_client.create_session(http_session, config.hermes_base_url, config.hermes_api_key, hermes_session_id)
+    # project_index_core.index_update может дойти до реального HTTP-вызова
+    # (эмбеддинг через wormsoft.ru, requests.post с таймаутом+ретраем — до
+    # ~44с в худшем случае). aiohttp однопоточный: синхронный вызов такой
+    # длины прямо в event loop замораживает ВЕСЬ процесс — не только этот
+    # запрос, а всех пользователей сразу. Уносим в executor-поток.
+    loop = asyncio.get_running_loop()
+    index_result = await loop.run_in_executor(
+        None, functools.partial(project_index_core.index_update, user, project_rel_path, **_project_index_kwargs(config)),
+    )
 
     chat_session_id = uuid.uuid4().hex
     storage.create_chat_session(

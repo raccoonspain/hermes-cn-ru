@@ -5,13 +5,14 @@ chat.html) отдаются как обычные статические фай�
 редиректит на /login.html при 401 (см. static-JS в Task 7)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
 import aiohttp
 from aiohttp import web
 
-from . import auth, quickchat, storage
+from . import auth, hermes_client, quickchat, storage
 
 COOKIE_NAME = "hermes_web_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 дней
@@ -86,6 +87,11 @@ async def handle_me(request: web.Request) -> web.Response:
     return web.json_response(user)
 
 
+async def handle_root(request: web.Request) -> web.Response:
+    target = "/home.html" if request.get("user") is not None else "/login.html"
+    raise web.HTTPFound(target)
+
+
 async def handle_quick_chat(request: web.Request) -> web.Response:
     user = _require_user(request)
     result = await quickchat.create_quick_chat(
@@ -124,9 +130,18 @@ async def handle_send_message(request: web.Request) -> web.StreamResponse:
         ):
             data = json.dumps(payload, ensure_ascii=False)
             await response.write(f"event: {name}\ndata: {data}\n\n".encode("utf-8"))
-    except quickchat.QuickChatError as exc:
+    except (quickchat.QuickChatError, hermes_client.HermesClientError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        # response.prepare() выше уже отправил 200 text/event-stream — на этом
+        # этапе упасть с необработанным исключением нельзя: клиент останется
+        # висеть на незакрытом потоке, а в логе будет трейсбек вместо понятной
+        # ошибки. Поэтому любой реалистичный сбой похода в Hermes (шлюз лежит/
+        # перезапускается, таймаут, обрыв соединения) конвертируем в тот же
+        # "event: error", что и QuickChatError, и следом шлём "done" — тем же
+        # {}, что и в успешном потоке (см. hermes_client.stream_chat), чтобы
+        # клиент закрыл EventSource по тому же признаку конца потока.
         data = json.dumps({"message": str(exc)}, ensure_ascii=False)
         await response.write(f"event: error\ndata: {data}\n\n".encode("utf-8"))
+        await response.write(b"event: done\ndata: {}\n\n")
     return response
 
 
@@ -147,7 +162,17 @@ async def _on_startup(app: web.Application) -> None:
     # behaviour, already true in 3.14) — create_app() itself is a plain sync
     # function that may run before any loop exists, so the session is built
     # here in on_startup, which aiohttp always runs inside the app's loop.
-    app["http_session"] = aiohttp.ClientSession()
+    #
+    # Explicit timeout: aiohttp's default ClientTimeout(total=300, ...) caps
+    # the *entire* request/response duration, including a streamed response —
+    # a tool-using Hermes agent turn can legitimately run longer than 5
+    # minutes, and the default would kill the stream mid-flight. total=None
+    # disables that whole-response cap; sock_read still guards against a
+    # truly stalled connection (no bytes at all for 5 minutes), and
+    # sock_connect keeps a dead/unreachable Hermes gateway from hanging a
+    # request at the TCP-connect stage.
+    timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=300)
+    app["http_session"] = aiohttp.ClientSession(timeout=timeout)
 
 
 async def _on_cleanup(app: web.Application) -> None:
@@ -169,5 +194,6 @@ def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secur
     app.router.add_post("/api/quick-chat", handle_quick_chat)
     app.router.add_post("/api/chat/{chat_session_id}/send", handle_send_message)
     app.router.add_get("/api/chat/{chat_session_id}/messages", handle_get_messages)
+    app.router.add_get("/", handle_root)
     app.router.add_static("/", static_dir, show_index=False)
     return app
