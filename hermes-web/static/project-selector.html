@@ -451,6 +451,7 @@ async function openPanel(p){
   renderPanel(p, null);
   const params = new URLSearchParams({ path: p.path });
   const resp = await apiFetch('/api/projects/detail?' + params.toString());
+  if(resp.status === 401){ location.href = 'login.html'; return; }
   if(resp.ok){
     renderPanel(p, await resp.json());
   }
@@ -469,6 +470,7 @@ function openMoveModal(p){
         body: JSON.stringify({ path: p.path, new_group: g.slug }),
       });
       document.getElementById('moveOverlay').classList.remove('on');
+      if(resp.status === 401){ location.href = 'login.html'; return; }
       if(!resp.ok){ alert('Не удалось перенести проект'); return; }
       document.body.classList.remove('panel-open');
       await loadGroups();
@@ -568,6 +570,7 @@ document.getElementById('ragSearch').addEventListener('input', debounce(async (e
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: q }),
   });
+  if(resp.status === 401){ location.href = 'login.html'; return; }
   if(!resp.ok){ searchResults = []; renderMain(); return; }
   const body = await resp.json();
   searchResults = body.results;
@@ -671,6 +674,7 @@ document.getElementById('groupEditorSave').addEventListener('click', async () =>
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, emoji: pendingEmoji }),
     });
+    if(resp.status === 401){ location.href = 'login.html'; return; }
     if(!resp.ok){ alert('Не удалось создать группу'); return; }
     const created = await resp.json();
     state.group = created.slug;
@@ -679,6 +683,7 @@ document.getElementById('groupEditorSave').addEventListener('click', async () =>
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ display_name: name, emoji: pendingEmoji }),
     });
+    if(resp.status === 401){ location.href = 'login.html'; return; }
     if(!resp.ok){ alert('Не удалось сохранить группу'); return; }
   }
   await loadGroups();
