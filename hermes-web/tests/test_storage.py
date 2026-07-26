@@ -66,3 +66,50 @@ def test_touch_chat_session_updates_last_message_at(tmp_path):
     storage.touch_chat_session(conn, "chat1", last_message_at=200.0)
     row = storage.get_chat_session(conn, "chat1")
     assert row["last_message_at"] == 200.0
+
+
+def test_group_meta_missing_returns_none(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    assert storage.get_group_meta(conn, "dem", "dom-i-remont") is None
+
+
+def test_group_meta_roundtrip(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    storage.upsert_group_meta(conn, "dem", "dom-i-remont", "Дом и ремонт", "🏠", True, created_at="2026-07-26T10:00:00")
+    row = storage.get_group_meta(conn, "dem", "dom-i-remont")
+    assert row["display_name"] == "Дом и ремонт"
+    assert row["emoji"] == "🏠"
+    assert bool(row["pinned"]) is True
+
+
+def test_upsert_group_meta_updates_existing_row(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    storage.upsert_group_meta(conn, "dem", "it", "IT", "🖥️", False, created_at="2026-07-26T10:00:00")
+    storage.upsert_group_meta(conn, "dem", "it", "IT / DevOps", "🖥️", True, created_at="2026-07-26T10:00:00")
+    row = storage.get_group_meta(conn, "dem", "it")
+    assert row["display_name"] == "IT / DevOps"
+    assert bool(row["pinned"]) is True
+
+
+def test_list_group_meta_scoped_to_user(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    storage.upsert_group_meta(conn, "dem", "it", "IT", "🖥️", False, created_at="t")
+    storage.upsert_group_meta(conn, "rost", "eng", "Английский", "🇬🇧", False, created_at="t")
+    rows = storage.list_group_meta(conn, "dem")
+    assert [r["slug"] for r in rows] == ["it"]
+
+
+def test_update_chat_session_project_path_moves_reference(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    storage.create_chat_session(conn, "chat1", "dem", "/old/path", "web_1", created_at=1.0)
+    storage.update_chat_session_project_path(conn, "/old/path", "/new/path")
+    row = storage.get_chat_session(conn, "chat1")
+    assert row["project_path"] == "/new/path"
+
+
+def test_update_chat_session_project_path_noop_when_no_match(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    storage.create_chat_session(conn, "chat1", "dem", "/old/path", "web_1", created_at=1.0)
+    storage.update_chat_session_project_path(conn, "/other/path", "/new/path")
+    row = storage.get_chat_session(conn, "chat1")
+    assert row["project_path"] == "/old/path"
