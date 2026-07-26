@@ -27,6 +27,8 @@ _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_")
 
 _TITLE_SECTION = "Название проекта"
 _DESCRIPTION_SECTION = "Краткое описание"
+_POINTS_SECTION = "Опорные точки"
+_NOW_SECTION = "На чём остановились"
 
 
 class ProjectIndexError(Exception):
@@ -56,6 +58,8 @@ def parse_about_md(text: str) -> dict:
     sections = _split_sections(body)
     title = sections.get(_TITLE_SECTION, "").strip()
     description = sections.get(_DESCRIPTION_SECTION, "").strip()
+    points = sections.get(_POINTS_SECTION, "").strip()
+    now = sections.get(_NOW_SECTION, "").strip()
     if not title:
         raise ProjectIndexError(f"about.md: отсутствует секция '{_TITLE_SECTION}'")
     if not description:
@@ -64,6 +68,8 @@ def parse_about_md(text: str) -> dict:
     return {
         "title": title,
         "description": description,
+        "points": points,
+        "now": now,
         "tags": list(frontmatter.get("tags") or []),
         "status": str(frontmatter.get("status") or "active"),
     }
@@ -90,6 +96,12 @@ def _read_about(project_dir: str) -> dict:
         return parse_about_md(fh.read())
 
 
+def _project_group(user: str, workspace_root: str, path: str) -> str:
+    root = os.path.realpath(workspace_root)
+    rel = os.path.relpath(path, os.path.join(root, user))
+    return rel.split(os.sep)[0]
+
+
 def _embed_text(about: dict) -> str:
     tags_text = ", ".join(about["tags"])
     return f"{about['title']}\n{about['description']}\n{tags_text}"
@@ -110,16 +122,21 @@ def index_update(
     if api_key:
         embedding = embeddings.fetch_embedding(_embed_text(about), api_key)
 
+    updated_at = datetime.datetime.utcfromtimestamp(
+        os.path.getmtime(_about_md_path(resolved))
+    ).isoformat()
+
     conn = storage.get_connection(db_path)
     try:
         storage.upsert_project(
             conn,
             path=resolved,
             title=about["title"],
+            description=about["description"],
             tags=about["tags"],
             status=about["status"],
             embedding=embedding,
-            updated_at=datetime.datetime.utcnow().isoformat(),
+            updated_at=updated_at,
         )
     finally:
         conn.close()
@@ -159,6 +176,7 @@ def search_similar(
 
     if not results:
         return {"results": [], "message": "ничего не проиндексировано или похожего не найдено"}
+    results = [{**r, "group": _project_group(user, workspace_root, r["path"])} for r in results]
     return {"results": results, "message": ""}
 
 
@@ -273,3 +291,27 @@ def reindex_all(
             failed.append({"path": dirpath, "error": str(exc)})
 
     return {"indexed": indexed, "failed": failed}
+
+
+def list_projects_for_user(
+    user: str,
+    workspace_root: str = WORKSPACE_ROOT,
+    db_path: str = DB_PATH,
+    updated_since: Optional[str] = None,
+    status: Optional[str] = None,
+    group: Optional[str] = None,
+) -> list:
+    conn = storage.get_connection(db_path)
+    try:
+        rows = storage.list_projects_filtered(
+            conn, workspace_root, user, updated_since=updated_since, status=status, group=group,
+        )
+    finally:
+        conn.close()
+    return [{**r, "group": _project_group(user, workspace_root, r["path"])} for r in rows]
+
+
+def get_project_detail(user: str, project_path: str, workspace_root: str = WORKSPACE_ROOT) -> dict:
+    resolved = resolve_project_path(user, project_path, workspace_root)
+    about = _read_about(resolved)
+    return {**about, "path": resolved, "group": _project_group(user, workspace_root, resolved)}

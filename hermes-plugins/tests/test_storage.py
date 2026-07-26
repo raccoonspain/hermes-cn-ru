@@ -80,3 +80,85 @@ def test_search_similar_orders_by_score_and_respects_top_k(tmp_path):
         "/workspace/dem/ALL/close",
         "/workspace/dem/ALL/mid",
     ]
+
+
+def test_upsert_project_stores_description(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(
+        conn, "/p/a", "т", [], "active", None, "2026-01-01T00:00:00", description="краткое описание",
+    )
+    row = storage.get_project(conn, "/p/a")
+    assert row["description"] == "краткое описание"
+
+
+def test_upsert_project_description_defaults_to_empty_string(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/p/a", "т", [], "active", None, "2026-01-01T00:00:00")
+    row = storage.get_project(conn, "/p/a")
+    assert row["description"] == ""
+
+
+def test_init_db_migrates_existing_table_without_description_column(tmp_path):
+    import sqlite3
+
+    db_path = str(tmp_path / "index.db")
+    old_conn = sqlite3.connect(db_path)
+    old_conn.execute(
+        """
+        CREATE TABLE projects (
+            path TEXT PRIMARY KEY, title TEXT NOT NULL, tags TEXT NOT NULL,
+            status TEXT NOT NULL, embedding BLOB, updated_at TEXT NOT NULL
+        )
+        """
+    )
+    old_conn.execute(
+        "INSERT INTO projects (path, title, tags, status, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ("/p/a", "старый", "[]", "active", None, "2026-01-01T00:00:00"),
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    conn = storage.get_connection(db_path)
+    row = storage.get_project(conn, "/p/a")
+    assert row["title"] == "старый"
+    assert row["description"] == ""
+
+
+def test_list_projects_filtered_by_status(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/workspace/dem/ALL/a", "a", [], "active", None, "2026-01-01T00:00:00")
+    storage.upsert_project(conn, "/workspace/dem/ALL/b", "b", [], "archived", None, "2026-01-01T00:00:00")
+    result = storage.list_projects_filtered(conn, "/workspace", "dem", status="active")
+    assert {p["path"] for p in result} == {"/workspace/dem/ALL/a"}
+
+
+def test_list_projects_filtered_by_updated_since(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/workspace/dem/ALL/old", "old", [], "active", None, "2020-01-01T00:00:00")
+    storage.upsert_project(conn, "/workspace/dem/ALL/new", "new", [], "active", None, "2026-07-01T00:00:00")
+    result = storage.list_projects_filtered(conn, "/workspace", "dem", updated_since="2026-01-01T00:00:00")
+    assert {p["path"] for p in result} == {"/workspace/dem/ALL/new"}
+
+
+def test_list_projects_filtered_by_group(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/workspace/dem/ALL/a", "a", [], "active", None, "t")
+    storage.upsert_project(conn, "/workspace/dem/1С/b", "b", [], "active", None, "t")
+    result = storage.list_projects_filtered(conn, "/workspace", "dem", group="ALL")
+    assert {p["path"] for p in result} == {"/workspace/dem/ALL/a"}
+
+
+def test_list_projects_filtered_group_star_means_everywhere(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/workspace/dem/ALL/a", "a", [], "active", None, "t")
+    storage.upsert_project(conn, "/workspace/dem/1С/b", "b", [], "active", None, "t")
+    result = storage.list_projects_filtered(conn, "/workspace", "dem", group="*")
+    assert {p["path"] for p in result} == {"/workspace/dem/ALL/a", "/workspace/dem/1С/b"}
+
+
+def test_list_projects_filtered_scoped_to_user(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/workspace/dem/ALL/a", "a", [], "active", None, "t")
+    storage.upsert_project(conn, "/workspace/rost/ALL/b", "b", [], "active", None, "t")
+    result = storage.list_projects_filtered(conn, "/workspace", "dem")
+    assert {p["path"] for p in result} == {"/workspace/dem/ALL/a"}

@@ -1,3 +1,4 @@
+import datetime
 import os
 
 import pytest
@@ -231,3 +232,107 @@ def test_reindex_all_indexes_every_project_with_about_md(tmp_path, monkeypatch):
 def test_reindex_all_missing_user_dir_raises(tmp_path):
     with pytest.raises(core.ProjectIndexError):
         core.reindex_all("nobody", workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"))
+
+
+def test_parse_about_md_extracts_points_and_now():
+    result = core.parse_about_md(ABOUT_MD_FULL)
+    assert result["points"] == "- начали с чистого листа"
+    assert result["now"] == "Заказали цемент"
+
+
+def test_parse_about_md_missing_points_and_now_default_to_empty_string():
+    result = core.parse_about_md(ABOUT_MD_NO_FRONTMATTER)
+    assert result["points"] == ""
+    assert result["now"] == ""
+
+
+def test_index_update_uses_about_md_mtime_not_call_time(tmp_path):
+    project_dir = _write_project(tmp_path, "dem/ALL/proj")
+    about_path = project_dir / "about.md"
+    fixed_mtime = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc).timestamp()
+    os.utime(about_path, (fixed_mtime, fixed_mtime))
+    db_path = str(tmp_path / "index.db")
+
+    result = core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+
+    conn = core.storage.get_connection(db_path)
+    row = core.storage.get_project(conn, result["path"])
+    assert row["updated_at"].startswith("2020-01-01")
+
+
+def test_index_update_repeated_call_without_change_keeps_updated_at(tmp_path):
+    project_dir = _write_project(tmp_path, "dem/ALL/proj")
+    fixed_mtime = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc).timestamp()
+    os.utime(project_dir / "about.md", (fixed_mtime, fixed_mtime))
+    db_path = str(tmp_path / "index.db")
+
+    core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+    result = core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+
+    conn = core.storage.get_connection(db_path)
+    row = core.storage.get_project(conn, result["path"])
+    assert row["updated_at"].startswith("2020-01-01")
+
+
+def test_index_update_stores_description(tmp_path):
+    _write_project(tmp_path, "dem/ALL/proj")
+    db_path = str(tmp_path / "index.db")
+    result = core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+    conn = core.storage.get_connection(db_path)
+    row = core.storage.get_project(conn, result["path"])
+    assert row["description"] == "Ведём таблицу закупок и остатков по стройке гаража"
+
+
+def test_list_projects_for_user_includes_group_and_description(tmp_path):
+    _write_project(tmp_path, "dem/ALL/a")
+    _write_project(tmp_path, "dem/1С/b")
+    db_path = str(tmp_path / "index.db")
+    core.index_update("dem", "dem/ALL/a", workspace_root=str(tmp_path), db_path=db_path)
+    core.index_update("dem", "dem/1С/b", workspace_root=str(tmp_path), db_path=db_path)
+
+    result = core.list_projects_for_user("dem", workspace_root=str(tmp_path), db_path=db_path)
+    by_group = {p["group"] for p in result}
+    assert by_group == {"ALL", "1С"}
+    assert all(p["description"] == "Ведём таблицу закупок и остатков по стройке гаража" for p in result)
+
+
+def test_list_projects_for_user_filters_by_since_and_status(tmp_path):
+    old_dir = _write_project(tmp_path, "dem/ALL/old")
+    _write_project(tmp_path, "dem/ALL/new")
+    db_path = str(tmp_path / "index.db")
+    old_mtime = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc).timestamp()
+    os.utime(old_dir / "about.md", (old_mtime, old_mtime))
+    core.index_update("dem", "dem/ALL/old", workspace_root=str(tmp_path), db_path=db_path)
+    core.index_update("dem", "dem/ALL/new", workspace_root=str(tmp_path), db_path=db_path)
+
+    result = core.list_projects_for_user(
+        "dem", workspace_root=str(tmp_path), db_path=db_path, updated_since="2025-01-01T00:00:00",
+    )
+    assert {p["path"] for p in result} == {str(tmp_path / "dem" / "ALL" / "new")}
+
+
+def test_get_project_detail_includes_points_now_and_group(tmp_path):
+    _write_project(tmp_path, "dem/ALL/proj")
+    detail = core.get_project_detail("dem", "dem/ALL/proj", workspace_root=str(tmp_path))
+    assert detail["title"] == "Учёт стройматериалов для гаража"
+    assert detail["points"] == "- начали с чистого листа"
+    assert detail["now"] == "Заказали цемент"
+    assert detail["group"] == "ALL"
+    assert detail["path"] == str(tmp_path / "dem" / "ALL" / "proj")
+
+
+def test_get_project_detail_rejects_other_user(tmp_path):
+    (tmp_path / "dem").mkdir()
+    _write_project(tmp_path, "rost/ALL/proj")
+    with pytest.raises(core.ProjectIndexError):
+        core.get_project_detail("dem", "rost/ALL/proj", workspace_root=str(tmp_path))
+
+
+def test_search_similar_includes_group(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/proj")
+    db_path = str(tmp_path / "index.db")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: [1.0, 0.0])
+    core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path, api_key="key")
+
+    result = core.search_similar("dem", "гараж", workspace_root=str(tmp_path), db_path=db_path, api_key="key")
+    assert result["results"][0]["group"] == "ALL"

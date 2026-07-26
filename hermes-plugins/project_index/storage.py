@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -37,6 +38,9 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+    if "description" not in existing_cols:
+        conn.execute("ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT ''")
     conn.commit()
 
 
@@ -61,17 +65,19 @@ def upsert_project(
     status: str,
     embedding: Optional[list],
     updated_at: str,
+    description: str = "",
 ) -> None:
     conn.execute(
         """
-        INSERT INTO projects (path, title, tags, status, embedding, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO projects (path, title, tags, status, embedding, updated_at, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET
             title=excluded.title,
             tags=excluded.tags,
             status=excluded.status,
             embedding=excluded.embedding,
-            updated_at=excluded.updated_at
+            updated_at=excluded.updated_at,
+            description=excluded.description
         """,
         (
             path,
@@ -80,6 +86,7 @@ def upsert_project(
             status,
             pack_embedding(embedding) if embedding is not None else None,
             updated_at,
+            description,
         ),
     )
     conn.commit()
@@ -116,6 +123,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "status": row["status"],
         "embedding": unpack_embedding(row["embedding"]) if row["embedding"] is not None else None,
         "updated_at": row["updated_at"],
+        "description": row["description"],
     }
 
 
@@ -147,3 +155,33 @@ def search_similar(
     ]
     scored.sort(key=lambda p: p["score"], reverse=True)
     return scored[:top_k]
+
+
+def list_projects_filtered(
+    conn: sqlite3.Connection,
+    workspace_root: str,
+    user: str,
+    updated_since: Optional[str] = None,
+    status: Optional[str] = None,
+    group: Optional[str] = None,
+) -> list:
+    query = "SELECT * FROM projects"
+    clauses = []
+    params: list = []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if updated_since:
+        clauses.append("updated_at >= ?")
+        params.append(updated_since)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+
+    rows = [_row_to_dict(r) for r in conn.execute(query, params).fetchall()]
+
+    user_prefix = f"{os.path.realpath(workspace_root).rstrip('/')}/{user}/"
+    rows = [r for r in rows if r["path"].startswith(user_prefix)]
+    if group and group != "*":
+        group_prefix = f"{user_prefix}{group}/"
+        rows = [r for r in rows if r["path"].startswith(group_prefix)]
+    return rows
