@@ -13,6 +13,7 @@ def _make_fake_hermes_app(*, sessions_created: list, chat_calls: list):
     async def create_session(request):
         body = await request.json()
         sessions_created.append(body)
+        assert request.headers.get("Authorization") == "Bearer fake-key"
         return web.json_response(
             {"object": "hermes.session", "session": {"id": body["id"]}}, status=201
         )

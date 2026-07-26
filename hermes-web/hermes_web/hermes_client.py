@@ -37,7 +37,7 @@ async def stream_chat(
 ) -> AsyncIterator[tuple[str, dict]]:
     url = f"{base_url.rstrip('/')}/api/sessions/{hermes_session_id}/chat/stream"
     body: dict[str, Any] = {"message": message}
-    if system_message:
+    if system_message is not None:
         body["system_message"] = system_message
 
     async with http_session.post(url, json=body, headers=_headers(api_key)) as resp:
