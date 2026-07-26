@@ -184,4 +184,12 @@ def list_projects_filtered(
     if group and group != "*":
         group_prefix = f"{user_prefix}{group}/"
         rows = [r for r in rows if r["path"].startswith(group_prefix)]
+
+    # Листинг — «витринная» функция: её результат уходит в JSON-ответ
+    # hermes-web и в контекст LLM. Сырой эмбеддинг (1024 float на проект)
+    # там не нужен и на целевом масштабе (~1000 проектов) раздувает ответ
+    # до ~20 МБ. search_similar эмбеддинги берёт через
+    # list_projects_for_user, так что этот strip его не ломает.
+    for r in rows:
+        r.pop("embedding", None)
     return rows

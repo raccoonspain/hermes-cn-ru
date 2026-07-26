@@ -347,6 +347,88 @@ async def test_move_project_success(aiohttp_client, app_and_conn, monkeypatch):
     assert body["new_path"] == "/new"
 
 
+_ABOUT_MD = """---
+tags: []
+status: active
+---
+
+# Название проекта
+Секрет Дмитрия
+
+# Краткое описание
+Не должно быть видно Ростиславу
+
+# Опорные точки
+
+# На чём остановились
+"""
+
+
+def _seed_project(tmp_path, rel_dir):
+    """Кладёт реальный проект на диск в workspace фикстуры app_and_conn
+    (тот же tmp_path — pytest отдаёт один и тот же каталог фикстуре и тесту)."""
+    project_dir = tmp_path / "workspace" / rel_dir
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(_ABOUT_MD, encoding="utf-8")
+    return project_dir
+
+
+@pytest.mark.asyncio
+async def test_project_detail_cross_user_returns_404_and_leaks_nothing(aiohttp_client, app_and_conn, tmp_path):
+    """Ростислав не должен вытащить проект Дмитрия по прямому пути.
+    Пиним гарантию на границе HTTP-маршрута — до этого её не проверял никто."""
+    _seed_project(tmp_path, "dem/ALL/x")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+    resp = await client.get("/api/projects/detail?path=dem/ALL/x")
+
+    assert resp.status == 404
+    body = await resp.text()
+    assert "Секрет Дмитрия" not in body
+    assert "Не должно быть видно" not in body
+
+
+@pytest.mark.asyncio
+async def test_project_detail_traversal_path_returns_404(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/x")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+    resp = await client.get("/api/projects/detail?path=rost/../dem/ALL/x")
+
+    assert resp.status == 404
+    assert "Секрет Дмитрия" not in await resp.text()
+
+
+@pytest.mark.asyncio
+async def test_move_project_traversal_new_group_returns_400(aiohttp_client, app_and_conn, tmp_path):
+    """POST /api/projects/move с new_group='../rost' обязан вернуть 400
+    и не тронуть проект — сквозная проверка маршрута поверх фикса в плагине."""
+    _seed_project(tmp_path, "dem/ALL/a")
+    (tmp_path / "workspace" / "rost").mkdir()
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/move", json={"path": "dem/ALL/a", "new_group": "../rost"})
+
+    assert resp.status == 400
+    assert (tmp_path / "workspace" / "dem" / "ALL" / "a").is_dir()
+    assert list((tmp_path / "workspace" / "rost").iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_move_project_cross_user_source_path_returns_400(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+    resp = await client.post("/api/projects/move", json={"path": "dem/ALL/a", "new_group": "ALL"})
+
+    assert resp.status == 400
+    assert (tmp_path / "workspace" / "dem" / "ALL" / "a").is_dir()
+
+
 @pytest.mark.asyncio
 async def test_move_project_collision_returns_400(aiohttp_client, app_and_conn, monkeypatch):
     async def fake_move_project(user, path, config, db_conn, new_group=None, new_name=None):

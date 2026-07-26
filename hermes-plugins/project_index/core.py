@@ -176,7 +176,15 @@ def search_similar(
 
     if not results:
         return {"results": [], "message": "ничего не проиндексировано или похожего не найдено"}
-    results = [{**r, "group": _project_group(user, workspace_root, r["path"])} for r in results]
+    # Эмбеддинг нужен был только для scoring внутри storage.search_similar —
+    # наружу (в контекст LLM и в HTTP-ответ) он не отдаётся.
+    results = [
+        {
+            **{k: v for k, v in r.items() if k != "embedding"},
+            "group": _project_group(user, workspace_root, r["path"]),
+        }
+        for r in results
+    ]
     return {"results": results, "message": ""}
 
 
@@ -236,8 +244,14 @@ def move_project(
     elif entering_all and not leaving_all:
         leaf = _add_date_prefix(leaf)
 
-    new_group_dir = os.path.join(root, user, target_group)
-    new_path = os.path.join(new_group_dir, leaf)
+    # new_group/new_name приходят снаружи (в том числе из HTTP —
+    # POST /api/projects/move), поэтому путь назначения валидируется тем же
+    # resolve_project_path, что и исходный, и ДО любых изменений на диске:
+    # иначе makedirs/shutil.move успевали унести проект в чужое пространство
+    # (или за пределы workspace), а вызывающий видел лишь ошибку в конце.
+    new_rel_path = os.path.join(user, target_group, leaf)
+    new_path = resolve_project_path(user, new_rel_path, workspace_root)
+    new_group_dir = os.path.dirname(new_path)
 
     if new_path == old_path:
         raise ProjectIndexError("не указаны new_group или new_name — нечего переносить")

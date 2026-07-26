@@ -1,6 +1,7 @@
 import datetime
 import os
 import sys
+import threading
 
 import pytest
 
@@ -166,14 +167,43 @@ async def test_search_projects_runs_in_executor_and_delegates_to_core(tmp_path, 
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)
 
+    calling_thread = threading.current_thread()
+    seen = {}
+
     def fake_search_similar(user, query, **kwargs):
         assert user == "dem"
         assert query == "гараж"
+        seen["thread"] = threading.current_thread()
         return {"results": [], "message": ""}
 
     monkeypatch.setattr(projects.project_index_core, "search_similar", fake_search_similar)
     result = await projects.search_projects("dem", "гараж", config)
     assert result == {"results": [], "message": ""}
+    # Без run_in_executor синхронный поиск (сеть + косинусы по всем проектам)
+    # блокировал бы однопоточный event loop hermes-web для всех пользователей.
+    assert seen["thread"] is not calling_thread
+    assert seen["thread"] is not threading.main_thread()
+
+
+@pytest.mark.asyncio
+async def test_move_project_runs_in_executor(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    calling_thread = threading.current_thread()
+    seen = {}
+
+    def fake_move_project(user, project_path, new_group=None, new_name=None, **kwargs):
+        seen["thread"] = threading.current_thread()
+        return {"old_path": "/old", "new_path": "/new", "indexed": False, "session_restart_required": True}
+
+    monkeypatch.setattr(projects.project_index_core, "move_project", fake_move_project)
+    result = await projects.move_project("dem", "dem/ALL/a", config, conn, new_group="1С")
+
+    assert result["new_path"] == "/new"
+    # move_project ходит на диск (shutil.move) и в wormsoft за эмбеддингом —
+    # это обязано происходить вне event loop.
+    assert seen["thread"] is not calling_thread
+    assert seen["thread"] is not threading.main_thread()
 
 
 @pytest.mark.asyncio

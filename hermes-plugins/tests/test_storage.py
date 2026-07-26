@@ -156,6 +156,27 @@ def test_list_projects_filtered_group_star_means_everywhere(tmp_path):
     assert {p["path"] for p in result} == {"/workspace/dem/ALL/a", "/workspace/dem/1С/b"}
 
 
+def test_list_projects_filtered_strips_embedding(tmp_path):
+    """Сырой эмбеддинг (1024 float на проект) не должен утекать в листинг:
+    его сериализация в JSON на ~1000 проектов — это ~20 МБ ответа и >1 с
+    блокировки однопоточного event loop в hermes-web."""
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/workspace/dem/ALL/a", "a", [], "active", [0.1, 0.2, 0.3], "t")
+    result = storage.list_projects_filtered(conn, "/workspace", "dem")
+    assert len(result) == 1
+    assert "embedding" not in result[0]
+    assert result[0]["title"] == "a"
+
+
+def test_list_projects_filtered_keeps_search_similar_working(tmp_path):
+    """Страховка: search_similar ходит через list_projects_for_user, а не
+    через list_projects_filtered, поэтому эмбеддинг ему всё ещё доступен."""
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/workspace/dem/ALL/close", "близко", [], "active", [1.0, 0.0], "t")
+    results = storage.search_similar(conn, "/workspace", "dem", [1.0, 0.0], top_k=1)
+    assert results[0]["score"] == pytest.approx(1.0)
+
+
 def test_list_projects_filtered_scoped_to_user(tmp_path):
     conn = storage.get_connection(str(tmp_path / "index.db"))
     storage.upsert_project(conn, "/workspace/dem/ALL/a", "a", [], "active", None, "t")

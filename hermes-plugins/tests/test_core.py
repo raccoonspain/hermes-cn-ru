@@ -207,6 +207,58 @@ def test_move_project_collision_raises_and_does_not_move(tmp_path, monkeypatch):
     assert os.path.isdir(str(tmp_path / "dem" / "ALL" / "a"))
 
 
+def test_move_project_new_group_traversal_raises_and_does_not_move(tmp_path, monkeypatch):
+    """new_group приходит из HTTP (POST /api/projects/move) — путь назначения
+    обязан валидироваться ДО любых изменений на диске, иначе проект уезжает
+    в чужое пространство, а вызывающий видит только ошибку."""
+    _write_project(tmp_path, "dem/ALL/a")
+    (tmp_path / "rost").mkdir()
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
+
+    with pytest.raises(core.ProjectIndexError):
+        core.move_project(
+            "dem", "dem/ALL/a", new_group="../rost",
+            workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"),
+        )
+
+    assert os.path.isdir(str(tmp_path / "dem" / "ALL" / "a"))
+    assert os.listdir(str(tmp_path / "rost")) == []
+
+
+def test_move_project_new_group_escaping_workspace_root_raises(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    _write_project(workspace, "dem/ALL/a")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
+
+    with pytest.raises(core.ProjectIndexError):
+        core.move_project(
+            "dem", "dem/ALL/a", new_group="../../escaped",
+            workspace_root=str(workspace), db_path=str(tmp_path / "index.db"),
+        )
+
+    assert os.path.isdir(str(workspace / "dem" / "ALL" / "a"))
+    assert not os.path.exists(str(tmp_path / "escaped"))
+    assert not os.path.exists(str(tmp_path.parent / "escaped"))
+
+
+def test_move_project_new_name_traversal_raises_and_does_not_move(tmp_path, monkeypatch):
+    """new_name тоже приходит из HTTP и попадает в leaf — он не должен
+    позволять выйти за пределы пространства пользователя даже при
+    безопасной new_group."""
+    _write_project(tmp_path, "dem/1С/a")
+    (tmp_path / "rost").mkdir()
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
+
+    with pytest.raises(core.ProjectIndexError):
+        core.move_project(
+            "dem", "dem/1С/a", new_name="../../rost/угнанный",
+            workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"),
+        )
+
+    assert os.path.isdir(str(tmp_path / "dem" / "1С" / "a"))
+    assert os.listdir(str(tmp_path / "rost")) == []
+
+
 def test_move_project_noop_call_raises(tmp_path, monkeypatch):
     _write_project(tmp_path, "dem/1С/проект")
     monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: None)
@@ -336,3 +388,26 @@ def test_search_similar_includes_group(tmp_path, monkeypatch):
 
     result = core.search_similar("dem", "гараж", workspace_root=str(tmp_path), db_path=db_path, api_key="key")
     assert result["results"][0]["group"] == "ALL"
+
+
+def test_search_similar_does_not_return_raw_embedding(tmp_path, monkeypatch):
+    """Эмбеддинг нужен только внутри scoring — наружу (в контекст LLM и в
+    HTTP-ответ) он уходить не должен: это ~30k токенов шума на вызов."""
+    _write_project(tmp_path, "dem/ALL/proj")
+    db_path = str(tmp_path / "index.db")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: [1.0, 0.0])
+    core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path, api_key="key")
+
+    result = core.search_similar("dem", "гараж", workspace_root=str(tmp_path), db_path=db_path, api_key="key")
+    assert "embedding" not in result["results"][0]
+    assert result["results"][0]["score"] == pytest.approx(1.0)
+
+
+def test_list_projects_for_user_does_not_return_raw_embedding(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/proj")
+    db_path = str(tmp_path / "index.db")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: [0.1, 0.2])
+    core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path, api_key="key")
+
+    result = core.list_projects_for_user("dem", workspace_root=str(tmp_path), db_path=db_path)
+    assert "embedding" not in result[0]
