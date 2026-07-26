@@ -17,3 +17,7 @@ __pycache__/
 # hermes-web: локальная SQLite-база (только на сервере/в тестах)
 hermes-web/*.db
 hermes-web/**/*.db
+
+# Рабочие артефакты Subagent-Driven Development (брифы, отчёты, дифф-пакеты
+# для ревью) — только для текущей сессии, не часть истории проекта
+.superpowers/sdd/
