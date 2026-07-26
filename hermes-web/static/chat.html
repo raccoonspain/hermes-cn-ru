@@ -58,11 +58,16 @@ function appendMessage(role, text) {
 }
 
 async function loadHistory() {
-  const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
-  if (!resp.ok) return;
-  const body = await resp.json();
-  for (const m of body.data) {
-    if (m.role === 'user' || m.role === 'assistant') appendMessage(m.role, m.content || '');
+  try {
+    const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
+    if (resp.status === 401) { location.href = 'login.html'; return; }
+    if (!resp.ok) return;
+    const body = await resp.json();
+    for (const m of body.data) {
+      if (m.role === 'user' || m.role === 'assistant') appendMessage(m.role, m.content || '');
+    }
+  } catch (err) {
+    // история не критична для продолжения — просто оставляем пустой тред
   }
 }
 
@@ -74,31 +79,37 @@ async function send() {
   appendMessage('user', text);
   const assistantEl = appendMessage('assistant', '');
 
-  const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/send`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
-  if (!resp.ok) {
+  try {
+    const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (resp.status === 401) { location.href = 'login.html'; return; }
+    if (!resp.ok) {
+      assistantEl.textContent = 'Hermes временно недоступен, попробуйте ещё раз';
+      return;
+    }
+    await readSSE(resp, (name, payload) => {
+      if (name === 'assistant.delta') assistantEl.textContent += payload.delta || '';
+      else if (name === 'assistant.completed' && payload.content) assistantEl.textContent = payload.content;
+      else if (name === 'error') assistantEl.textContent = `Ошибка: ${payload.message || 'неизвестная'}`;
+      // остальные события (tool.*, done, ...) на этом минимальном экране не отображаются
+      threadEl.scrollTop = threadEl.scrollHeight;
+    });
+  } catch (err) {
     assistantEl.textContent = 'Hermes временно недоступен, попробуйте ещё раз';
+  } finally {
     sendBtn.disabled = false;
-    return;
   }
-  await readSSE(resp, (name, payload) => {
-    if (name === 'assistant.delta') assistantEl.textContent += payload.delta || '';
-    else if (name === 'assistant.completed' && payload.content) assistantEl.textContent = payload.content;
-    else if (name === 'error') assistantEl.textContent = `Ошибка: ${payload.message || 'неизвестная'}`;
-    // остальные события (tool.*, done, ...) на этом минимальном экране не отображаются
-    threadEl.scrollTop = threadEl.scrollHeight;
-  });
-  sendBtn.disabled = false;
 }
 
 (async () => {
   const me = await requireAuth();
   if (!me) return;
   if (!chatSessionId) { location.href = 'home.html'; return; }
-  document.getElementById('projectPath').textContent = chatSessionId;
+  const projectPath = new URLSearchParams(location.search).get('path');
+  document.getElementById('projectPath').textContent = projectPath || chatSessionId;
   await loadHistory();
 })();
 

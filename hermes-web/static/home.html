@@ -112,10 +112,16 @@ document.getElementById('logoutBtn').addEventListener('click', logout);
 
 document.getElementById('quickChatTile').addEventListener('click', async (e) => {
   e.preventDefault();
-  const resp = await apiFetch('/api/quick-chat', { method: 'POST' });
-  if (!resp.ok) { alert('Не удалось начать чат — попробуйте ещё раз'); return; }
-  const body = await resp.json();
-  location.href = `chat.html?id=${encodeURIComponent(body.chat_session_id)}`;
+  try {
+    const resp = await apiFetch('/api/quick-chat', { method: 'POST' });
+    if (resp.status === 401) { location.href = 'login.html'; return; }
+    if (!resp.ok) { alert('Не удалось начать чат — попробуйте ещё раз'); return; }
+    const body = await resp.json();
+    const params = new URLSearchParams({ id: body.chat_session_id, path: body.project_path || '' });
+    location.href = `chat.html?${params.toString()}`;
+  } catch (err) {
+    alert('Hermes временно недоступен, попробуйте ещё раз');
+  }
 });
 </script>
 </body>
