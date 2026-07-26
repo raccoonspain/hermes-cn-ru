@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проекты — Hermes</title>
+<style>
+  :root{
+    --sky:#12172b;
+    --sky-deep:#0c1020;
+    --panel:#1a2038;
+    --panel-2:#212949;
+    --panel-line:#3c4568;
+    --text:#f8f6ef;
+    --text-dim:#aeb7dc;
+    --gold:#f0bb5c;
+    --violet:#ad9fe6;
+    --teal:#7fc4b2;
+    --dim-star:#727bab;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:
+      radial-gradient(1px 1px at 20% 30%, #fff8, transparent),
+      radial-gradient(1px 1px at 65% 15%, #fff6, transparent),
+      radial-gradient(1.5px 1.5px at 82% 60%, #fff9, transparent),
+      radial-gradient(1px 1px at 40% 80%, #fff5, transparent),
+      radial-gradient(1px 1px at 12% 65%, #fff7, transparent),
+      radial-gradient(1.5px 1.5px at 92% 30%, #fff6, transparent),
+      linear-gradient(180deg, var(--sky-deep), var(--sky) 40%);
+    color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    height:100vh;
+    display:grid;
+    grid-template-columns:270px 1fr 0px;
+    transition:grid-template-columns .22s ease;
+  }
+  body.panel-open{grid-template-columns:270px 1fr 440px}
+
+  aside.groups{
+    border-right:1px solid var(--panel-line);
+    padding:26px 18px;
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    overflow:hidden;
+  }
+  .brand{font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim)}
+  aside.groups h1{font-size:21px;font-weight:400;font-style:italic;margin:4px 0 16px}
+
+  .group-search{
+    display:flex;align-items:center;gap:8px;
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;
+    padding:8px 10px;margin-bottom:16px;flex-shrink:0;
+  }
+  .group-search input{
+    flex:1;background:none;border:none;outline:none;color:var(--text);
+    font-family:Georgia,serif;font-size:13px;
+  }
+  .group-search svg{flex-shrink:0;opacity:.6}
+
+  .glabel{
+    font-family:ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:1.5px;
+    text-transform:uppercase;color:var(--text-dim);margin:10px 0 6px;flex-shrink:0;
+  }
+  .grouplist{display:flex;flex-direction:column;gap:1px;overflow-y:auto}
+  .grouplist.pinned{flex-shrink:0;max-height:210px}
+  .grouplist.rest{flex:1;min-height:0}
+  .glist-wrap{display:flex;flex-direction:column;min-height:0;flex:1}
+
+  .grow{
+    display:flex;align-items:center;gap:10px;
+    padding:9px 10px;border-radius:8px;cursor:pointer;
+    color:var(--text-dim);font-size:14px;
+  }
+  .grow:hover{background:var(--panel)}
+  .grow.active{background:var(--panel-2);color:var(--text)}
+  .grow .emoji{font-size:15px;width:18px;text-align:center;flex-shrink:0}
+  .grow .gname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .grow .n{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);flex-shrink:0}
+  .grow .pin{
+    opacity:0;flex-shrink:0;background:none;border:none;color:var(--gold);
+    cursor:pointer;font-size:12px;padding:2px;
+  }
+  .grow:hover .pin{opacity:.7}
+  .grow .pin:hover{opacity:1 !important}
+  .grow .pin.is-pinned{opacity:.9;color:var(--gold)}
+
+  .divider{height:1px;background:var(--panel-line);margin:14px 0;flex-shrink:0}
+  .grow.everywhere{flex-shrink:0;font-weight:400;color:var(--text-dim)}
+  .grow.everywhere.active{background:var(--panel-2);color:var(--gold);border:1px solid var(--gold)}
+  .grow.everywhere .n{color:var(--gold)}
+
+  .add-group{
+    margin-top:14px;flex-shrink:0;
+    font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
+    color:var(--text-dim);background:none;border:1px dashed var(--panel-line);
+    border-radius:8px;padding:9px;cursor:pointer;width:100%;
+  }
+  .add-group:hover{color:var(--text);border-color:var(--violet)}
+
+  main{padding:30px 34px 40px;overflow-y:auto;min-height:0}
+  .mainhead{display:flex;align-items:baseline;gap:12px;margin-bottom:20px}
+  .mainhead .emoji-lg{font-size:26px}
+  .mainhead h2{font-size:25px;font-weight:400;font-style:italic;margin:0}
+  .mainhead span{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-dim)}
+
+  .filters{
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;
+    padding:16px 18px;margin-bottom:26px;display:flex;flex-direction:column;gap:12px;
+  }
+  .rag-row{display:flex;align-items:center;gap:10px}
+  .rag-row svg{opacity:.6;flex-shrink:0}
+  .rag-row input{
+    flex:1;background:none;border:none;outline:none;color:var(--text);
+    font-family:Georgia,serif;font-style:italic;font-size:14px;
+  }
+  .rag-row .hint{font-family:ui-monospace,Consolas,monospace;font-size:9.5px;color:var(--dim-star);letter-spacing:.5px;text-transform:uppercase;flex-shrink:0}
+
+  .filter-row2{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--panel-line)}
+  .tagcloud{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+  .tagbtn{
+    font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:#e7e2fa;
+    background:rgba(173,159,230,.24);border:1px solid rgba(173,159,230,.65);
+    padding:4px 9px;border-radius:20px;cursor:pointer;
+  }
+  .tagbtn.on{background:var(--violet);color:var(--sky-deep);border-color:var(--violet)}
+  .tagbtn.mini{cursor:default;font-size:9.5px;padding:3px 7px}
+
+  .statusgroup,.timegroup{display:flex;gap:2px;background:var(--sky-deep);border:1px solid var(--panel-line);border-radius:20px;padding:2px;flex-shrink:0}
+  .statusgroup button,.timegroup button{
+    font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);
+    background:none;border:none;padding:5px 11px;border-radius:16px;cursor:pointer;
+  }
+  .statusgroup button.on,.timegroup button.on{background:var(--gold);color:var(--sky-deep)}
+  .reset-btn{
+    font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);
+    background:none;border:1px solid var(--panel-line);border-radius:20px;padding:5px 11px;cursor:pointer;flex-shrink:0;
+  }
+  .reset-btn:hover{color:var(--text);border-color:var(--violet)}
+
+  .filters.searching .tagcloud,.filters.searching .statusgroup,.filters.searching .timegroup{display:none}
+
+  .edit-group-btn{
+    margin-left:auto;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-dim);
+    background:none;border:1px solid var(--panel-line);border-radius:20px;padding:6px 12px;cursor:pointer;flex-shrink:0;
+  }
+  .edit-group-btn:hover{color:var(--text);border-color:var(--violet)}
+
+  .tilesize{display:flex;align-items:center;gap:8px;flex-shrink:0;color:var(--text-dim)}
+  .tilesize input[type=range]{width:90px;accent-color:var(--gold)}
+
+  .list{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--tile-min,230px),1fr));
+    gap:12px;align-content:start;
+  }
+  .prow{
+    display:flex;flex-direction:column;gap:8px;
+    padding:14px 15px;border-radius:12px;cursor:pointer;
+    border:1px solid var(--panel-line);background:var(--panel);
+    min-height:0;
+  }
+  .prow:hover{border-color:var(--violet)}
+  .prow.selected{background:var(--panel-2);border-color:var(--gold)}
+  .prow .rowhead{display:flex;align-items:baseline;gap:7px}
+  .prow .mark{color:var(--gold);font-size:12px;flex-shrink:0}
+  .prow .mark.dim{color:var(--dim-star)}
+  .prow .grp-hint{
+    margin-left:auto;font-family:ui-monospace,Consolas,monospace;font-size:9px;
+    color:var(--text-dim);white-space:nowrap;flex-shrink:0;
+  }
+  .prow .body h3{margin:0;font-size:14.5px;font-weight:400;color:var(--text);line-height:1.35}
+  .prow .body p{
+    margin:0;font-size:12px;color:var(--text-dim);line-height:1.5;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .prow .foot{display:flex;align-items:center;gap:6px;margin-top:auto;flex-wrap:wrap}
+  .prow .body .tags{display:flex;gap:5px;flex-wrap:wrap;flex:1}
+  .prow .status{font-family:ui-monospace,Consolas,monospace;font-size:9.5px;color:var(--teal);white-space:nowrap;flex-shrink:0}
+  .prow .status.archived{color:var(--dim-star)}
+
+  .empty{color:var(--text-dim);font-family:ui-monospace,Consolas,monospace;font-size:12.5px;padding:30px 4px}
+
+  .panel3{
+    border-left:1px solid var(--panel-line);
+    background:var(--sky-deep);
+    overflow:hidden;
+    display:flex;flex-direction:column;
+  }
+  body.panel-open .panel3{overflow-y:auto}
+  .panel3-inner{padding:32px 30px;width:440px}
+  .panel3 .close{
+    background:none;border:none;color:var(--text-dim);cursor:pointer;
+    font-family:ui-monospace,Consolas,monospace;font-size:11px;margin-bottom:18px;
+  }
+  .panel3 .close:hover{color:var(--text)}
+  .panel3 .p-status{
+    display:inline-block;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;
+    color:var(--teal);border:1px solid var(--teal);padding:2px 8px;border-radius:20px;margin-bottom:14px;
+  }
+  .panel3 .p-status.archived{color:var(--dim-star);border-color:var(--dim-star)}
+  .panel3 h2{font-size:23px;font-weight:400;margin:0 0 4px;line-height:1.3}
+  .panel3 .p-group{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-dim);margin-bottom:22px}
+  .p-block{margin-bottom:22px}
+  .p-block .lbl{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--violet);margin-bottom:7px}
+  .p-block p{margin:0;font-size:14.5px;line-height:1.65;color:var(--text)}
+  .p-tags{display:flex;gap:6px;flex-wrap:wrap}
+  .p-tags span{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:#e7e2fa;background:rgba(173,159,230,.24);border:1px solid rgba(173,159,230,.65);padding:3px 9px;border-radius:20px}
+  .p-actions{display:flex;flex-direction:column;gap:8px;margin-top:26px}
+  .p-actions button{
+    font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:11px;border-radius:8px;cursor:pointer;
+  }
+  .btn-primary{background:var(--gold);color:var(--sky-deep);border:none}
+  .btn-secondary{background:none;color:var(--text-dim);border:1px solid var(--panel-line)}
+  .btn-secondary:hover{color:var(--text);border-color:var(--violet)}
+
+  .overlay{position:fixed;inset:0;background:rgba(6,8,16,.72);display:none;align-items:center;justify-content:center;z-index:10}
+  .overlay.on{display:flex}
+  .modal{width:420px;max-width:90vw;background:var(--panel);border:1px solid var(--panel-line);border-radius:14px;padding:26px;max-height:82vh;overflow-y:auto}
+  .modal h3{margin:0 0 20px;font-weight:400;font-style:italic;font-size:19px}
+  .modal-top{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+  .emoji-preview{
+    width:52px;height:52px;flex-shrink:0;border-radius:12px;background:var(--sky-deep);
+    display:flex;align-items:center;justify-content:center;font-size:26px;border:1px solid var(--panel-line);
+  }
+  .modal input[type=text]{
+    flex:1;background:var(--sky-deep);border:1px solid var(--panel-line);border-radius:8px;
+    padding:10px 12px;color:var(--text);font-family:Georgia,serif;font-size:14px;
+  }
+  .modal label{display:block;font-family:ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);margin:16px 0 8px}
+  .emoji-cat{margin-bottom:12px}
+  .emoji-cat-label{font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--text-dim);margin-bottom:6px}
+  .emoji-grid{display:flex;flex-wrap:wrap;gap:6px}
+  .emoji-opt{
+    width:34px;height:34px;font-size:17px;background:var(--sky-deep);border:1px solid var(--panel-line);
+    border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  }
+  .emoji-opt:hover{border-color:var(--violet)}
+  .emoji-opt.selected{border-color:var(--gold);background:var(--panel-2)}
+  .custom-emoji-row{display:flex;align-items:center;gap:10px}
+  .custom-emoji-row input{width:90px;text-align:center;font-size:18px}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}
+  .modal-actions button{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;padding:9px 16px;border-radius:8px;cursor:pointer}
+  .ghost-btn{background:none;color:var(--text-dim);border:1px solid var(--panel-line);width:100%;text-align:left}
+  .ghost-btn:hover{color:var(--text);border-color:var(--violet)}
+  #moveGroupList{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto}
+</style>
+</head>
+<body>
+
+<aside class="groups">
+  <div class="brand" style="display:flex;align-items:center;justify-content:space-between">Hermes <a href="home.html" style="color:var(--text-dim);text-decoration:none" title="на главную">🏠</a></div>
+  <h1>Группы</h1>
+
+  <div class="group-search">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input id="groupSearch" type="text" placeholder="искать группу…">
+  </div>
+
+  <div id="everywhereRow" class="grow everywhere"><span class="emoji">🔭</span><span class="gname">Искать везде</span><span class="n" id="everywhereN"></span></div>
+  <div class="divider" style="margin:10px 0"></div>
+
+  <div class="glist-wrap">
+    <div class="glabel">Закреплённые</div>
+    <div class="grouplist pinned" id="pinnedList"></div>
+    <div class="divider"></div>
+    <div class="glabel">Все группы</div>
+    <div class="grouplist rest" id="restList"></div>
+  </div>
+
+  <button class="add-group" id="addGroupBtn">+ новая группа</button>
+</aside>
+
+<main>
+  <div class="mainhead">
+    <span class="emoji-lg" id="headEmoji">🗂️</span>
+    <h2 id="headName">…</h2>
+    <span id="headCount"></span>
+    <button class="edit-group-btn" id="editGroupBtn">⚙️ настроить группу</button>
+  </div>
+
+  <div class="filters" id="filters">
+    <div class="rag-row">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="ragSearch" type="text" placeholder="поискать похожие проекты по смыслу…">
+      <span class="hint">RAG</span>
+    </div>
+    <div class="filter-row2">
+      <div class="tagcloud" id="tagCloud"></div>
+      <div class="statusgroup" id="statusGroup">
+        <button data-status="all">ALL</button>
+        <button data-status="active" class="on">active</button>
+        <button data-status="archived">archived</button>
+      </div>
+      <div class="timegroup" id="timeGroup">
+        <button data-since="week">неделя</button>
+        <button data-since="month" class="on">месяц</button>
+        <button data-since="quarter">квартал</button>
+        <button data-since="half_year">полгода</button>
+        <button data-since="year">год</button>
+        <button data-since="all">всё время</button>
+      </div>
+      <button class="reset-btn" id="resetFilters" title="сбросить поиск, теги и фильтры">✕ сбросить</button>
+      <div class="tilesize" title="размер плиток">
+        <span>🔳</span><input type="range" id="tileSize" min="180" max="360" step="10" value="230">
+      </div>
+    </div>
+  </div>
+
+  <div class="list" id="projectList"></div>
+  <div class="empty" id="emptyMsg" style="display:none">— в этой выборке ничего нет —</div>
+</main>
+
+<div class="panel3">
+  <div class="panel3-inner" id="panelInner"></div>
+</div>
+
+<div class="overlay" id="groupEditorOverlay">
+  <div class="modal">
+    <h3 id="groupEditorTitle">Настроить группу</h3>
+    <div class="modal-top">
+      <div class="emoji-preview" id="emojiPreview">🗂️</div>
+      <input type="text" id="groupNameInput" placeholder="название группы">
+    </div>
+    <label>Эмодзи по смыслу</label>
+    <div id="emojiCategories"></div>
+    <label>Своё (вставьте из буфера, Ctrl+V)</label>
+    <div class="custom-emoji-row">
+      <input type="text" id="customEmojiInput" maxlength="4" placeholder="😀">
+    </div>
+    <div class="modal-actions">
+      <button class="ghost-btn" id="groupEditorCancel" style="width:auto">Отмена</button>
+      <button class="btn-primary" id="groupEditorSave" style="padding:9px 16px">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="moveOverlay">
+  <div class="modal" style="width:320px">
+    <h3>Перенести в группу</h3>
+    <div id="moveGroupList"></div>
+    <div class="modal-actions">
+      <button class="ghost-btn" id="moveCancel" style="width:auto">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+let groups = [];
+let projects = [];
+let searchResults = null;
+
+const state = { group: 'ALL', status: 'active', since: 'month', tags: new Set(), ragQuery: '', groupQuery: '', selectedProject: null };
+
+function debounce(fn, ms){
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+async function loadGroups(){
+  const resp = await apiFetch('/api/groups');
+  if(resp.status === 401){ location.href = 'login.html'; return; }
+  const body = await resp.json();
+  groups = body.groups;
+}
+
+async function loadProjects(){
+  const params = new URLSearchParams({ group: state.group, since: state.since, status: state.status });
+  const resp = await apiFetch('/api/projects?' + params.toString());
+  if(resp.status === 401){ location.href = 'login.html'; return; }
+  const body = await resp.json();
+  projects = body.projects;
+  renderMain();
+}
+
+function resetFilters(){
+  state.status = 'active'; state.since = 'month'; state.tags.clear(); state.ragQuery = '';
+  document.getElementById('ragSearch').value = '';
+  searchResults = null;
+  [...document.getElementById('statusGroup').children].forEach(b => b.classList.remove('on'));
+  document.getElementById('statusGroup').querySelector('[data-status="active"]').classList.add('on');
+  [...document.getElementById('timeGroup').children].forEach(b => b.classList.remove('on'));
+  document.getElementById('timeGroup').querySelector('[data-since="month"]').classList.add('on');
+}
+
+function groupRow(g){
+  const row = document.createElement('div');
+  row.className = 'grow' + (g.slug === state.group ? ' active' : '');
+  row.innerHTML = `<span class="emoji">${g.emoji || '🗂️'}</span><span class="gname">${g.display_name}</span><span class="n">${g.project_count}</span><button class="pin ${g.pinned ? 'is-pinned' : ''}" title="закрепить">${g.pinned ? '★' : '☆'}</button>`;
+  row.addEventListener('click', async (e) => {
+    if(e.target.classList.contains('pin')){
+      await apiFetch('/api/groups/' + encodeURIComponent(g.slug), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned: !g.pinned }),
+      });
+      await loadGroups();
+      renderGroups();
+      return;
+    }
+    state.group = g.slug; state.selectedProject = null;
+    document.body.classList.remove('panel-open');
+    resetFilters();
+    renderGroups();
+    await loadProjects();
+  });
+  return row;
+}
+
+function renderGroups(){
+  document.getElementById('everywhereRow').classList.toggle('active', state.group === '*');
+  const q = state.groupQuery.trim().toLowerCase();
+  const match = g => g.display_name.toLowerCase().includes(q);
+  const pinnedEl = document.getElementById('pinnedList');
+  const restEl = document.getElementById('restList');
+  pinnedEl.innerHTML = ''; restEl.innerHTML = '';
+  groups.filter(g => g.pinned && match(g)).forEach(g => pinnedEl.appendChild(groupRow(g)));
+  groups.filter(g => !g.pinned && match(g)).forEach(g => restEl.appendChild(groupRow(g)));
+  document.getElementById('everywhereN').textContent = groups.reduce((sum, g) => sum + g.project_count, 0);
+}
+
+function renderPanel(p, detail){
+  document.body.classList.add('panel-open');
+  const pg = groups.find(x => x.slug === p.group) || { emoji: '🗂️', display_name: p.group };
+  const points = detail ? (detail.points || '— нет —') : 'Загрузка…';
+  const now = detail ? (detail.now || '— нет —') : 'Загрузка…';
+  document.getElementById('panelInner').innerHTML = `
+    <button class="close" onclick="document.body.classList.remove('panel-open')">✕ закрыть</button>
+    <span class="p-status ${p.status}">${p.status}</span>
+    <h2>${p.title}</h2>
+    <div class="p-group">${pg.emoji || '🗂️'} ${pg.display_name}</div>
+    <div class="p-block"><div class="lbl">Краткое описание</div><p>${p.description}</p></div>
+    <div class="p-block"><div class="lbl">Опорные точки</div><p>${points}</p></div>
+    <div class="p-block"><div class="lbl">На чём остановились</div><p>${now}</p></div>
+    <div class="p-block"><div class="lbl">Tags</div><div class="p-tags">${p.tags.map(t => '<span>#' + t + '</span>').join('') || '<span style="opacity:.5">— нет —</span>'}</div></div>
+    <div class="p-actions">
+      <button class="btn-primary" id="openProjectBtn">Открыть проект →</button>
+      <button class="btn-secondary" id="movePanelBtn">Перенести в другую группу</button>
+    </div>
+  `;
+  document.getElementById('openProjectBtn').addEventListener('click', () => {
+    alert('Полноценный экран проекта появится в следующем срезе.');
+  });
+  document.getElementById('movePanelBtn').addEventListener('click', () => openMoveModal(p));
+}
+
+async function openPanel(p){
+  state.selectedProject = p.path;
+  renderMain();
+  renderPanel(p, null);
+  const params = new URLSearchParams({ path: p.path });
+  const resp = await apiFetch('/api/projects/detail?' + params.toString());
+  if(resp.ok){
+    renderPanel(p, await resp.json());
+  }
+}
+
+function openMoveModal(p){
+  const list = document.getElementById('moveGroupList');
+  list.innerHTML = '';
+  groups.filter(g => g.slug !== p.group).forEach(g => {
+    const btn = document.createElement('button');
+    btn.className = 'ghost-btn';
+    btn.textContent = `${g.emoji || '🗂️'} ${g.display_name}`;
+    btn.addEventListener('click', async () => {
+      const resp = await apiFetch('/api/projects/move', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: p.path, new_group: g.slug }),
+      });
+      document.getElementById('moveOverlay').classList.remove('on');
+      if(!resp.ok){ alert('Не удалось перенести проект'); return; }
+      document.body.classList.remove('panel-open');
+      await loadGroups();
+      renderGroups();
+      await loadProjects();
+    });
+    list.appendChild(btn);
+  });
+  document.getElementById('moveOverlay').classList.add('on');
+}
+
+document.getElementById('moveCancel').addEventListener('click', () => {
+  document.getElementById('moveOverlay').classList.remove('on');
+});
+
+function renderMain(){
+  const searching = searchResults !== null;
+  document.getElementById('filters').classList.toggle('searching', searching);
+
+  let list = searching ? searchResults.slice() : projects.slice();
+  const scopeTotal = list.length;
+  if(!searching && state.tags.size) list = list.filter(p => p.tags.some(t => state.tags.has(t)));
+
+  const everywhere = state.group === '*';
+  const g = everywhere
+    ? { emoji: '🔭', display_name: 'Искать везде — все группы' }
+    : (groups.find(x => x.slug === state.group) || { emoji: '🗂️', display_name: state.group });
+  document.getElementById('headEmoji').textContent = g.emoji || '🗂️';
+  document.getElementById('headName').textContent = g.display_name;
+  document.getElementById('editGroupBtn').style.display = (everywhere || searching) ? 'none' : 'inline-block';
+  document.getElementById('headCount').textContent = searching ? `${list.length} похожих по смыслу` : `${list.length} из ${scopeTotal}`;
+
+  const cloud = document.getElementById('tagCloud');
+  cloud.innerHTML = '';
+  if(!searching){
+    const tagSet = new Set();
+    projects.forEach(p => p.tags.forEach(t => tagSet.add(t)));
+    [...tagSet].forEach(t => {
+      const b = document.createElement('button');
+      b.className = 'tagbtn' + (state.tags.has(t) ? ' on' : '');
+      b.textContent = '#' + t;
+      b.addEventListener('click', () => {
+        state.tags.has(t) ? state.tags.delete(t) : state.tags.add(t);
+        renderMain();
+      });
+      cloud.appendChild(b);
+    });
+  }
+
+  const listEl = document.getElementById('projectList');
+  listEl.innerHTML = '';
+  document.getElementById('emptyMsg').style.display = list.length ? 'none' : 'block';
+  list.forEach(p => {
+    const pg = groups.find(x => x.slug === p.group) || { emoji: '🗂️', display_name: p.group };
+    const row = document.createElement('div');
+    row.className = 'prow' + (state.selectedProject === p.path ? ' selected' : '');
+    row.innerHTML = `
+      <div class="rowhead">
+        <span class="mark ${p.status === 'archived' ? 'dim' : ''}">${p.status === 'archived' ? '✧' : '✦'}</span>
+        ${(everywhere || searching) ? `<span class="grp-hint">${pg.emoji || '🗂️'} ${pg.display_name}</span>` : ''}
+      </div>
+      <div class="body"><h3>${p.title}</h3><p>${p.description}</p></div>
+      <div class="foot">
+        <div class="tags">${p.tags.map(t => '<span class="tagbtn mini">#' + t + '</span>').join('')}</div>
+        <span class="status ${p.status}">${p.status}</span>
+      </div>
+    `;
+    row.addEventListener('click', () => openPanel(p));
+    listEl.appendChild(row);
+  });
+}
+
+document.getElementById('everywhereRow').addEventListener('click', async () => {
+  state.group = '*'; state.selectedProject = null;
+  document.body.classList.remove('panel-open');
+  resetFilters();
+  renderGroups();
+  await loadProjects();
+});
+
+document.getElementById('resetFilters').addEventListener('click', async () => {
+  resetFilters();
+  await loadProjects();
+});
+
+document.getElementById('tileSize').addEventListener('input', e => {
+  document.documentElement.style.setProperty('--tile-min', e.target.value + 'px');
+});
+
+document.getElementById('groupSearch').addEventListener('input', e => { state.groupQuery = e.target.value; renderGroups(); });
+
+document.getElementById('ragSearch').addEventListener('input', debounce(async (e) => {
+  const q = e.target.value.trim();
+  state.ragQuery = q;
+  if(!q){ searchResults = null; renderMain(); return; }
+  const resp = await apiFetch('/api/projects/search', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: q }),
+  });
+  if(!resp.ok){ searchResults = []; renderMain(); return; }
+  const body = await resp.json();
+  searchResults = body.results;
+  renderMain();
+}, 400));
+
+document.getElementById('statusGroup').addEventListener('click', async (e) => {
+  if(e.target.tagName !== 'BUTTON') return;
+  state.status = e.target.dataset.status;
+  [...document.getElementById('statusGroup').children].forEach(b => b.classList.remove('on'));
+  e.target.classList.add('on');
+  await loadProjects();
+});
+
+document.getElementById('timeGroup').addEventListener('click', async (e) => {
+  if(e.target.tagName !== 'BUTTON') return;
+  state.since = e.target.dataset.since;
+  [...document.getElementById('timeGroup').children].forEach(b => b.classList.remove('on'));
+  e.target.classList.add('on');
+  await loadProjects();
+});
+
+const EMOJI_CATS = {
+  'Работа / IT': ['🖥️','💻','🧰','🔧','⚙️','📊','🗂️','📁'],
+  'Дом и быт':   ['🏠','🍲','🧹','🚗','🩺','🌿'],
+  'Учёба и языки':['📚','🎓','🇬🇧','🇨🇳','✏️','🧠'],
+  'Финансы':     ['💰','💳','📈','🧾'],
+  'Путешествия и хобби':['✈️','🎨','🎮','📷','⚽'],
+  'Разное':      ['⭐','📌','🔭','🗃️','❔'],
+};
+
+let editingGroupSlug = null;
+let pendingEmoji = null;
+
+function renderEmojiGrid(){
+  const wrap = document.getElementById('emojiCategories');
+  wrap.innerHTML = '';
+  Object.entries(EMOJI_CATS).forEach(([cat, list]) => {
+    const catDiv = document.createElement('div');
+    catDiv.className = 'emoji-cat';
+    const grid = document.createElement('div');
+    grid.className = 'emoji-grid';
+    list.forEach(e => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'emoji-opt' + (e === pendingEmoji ? ' selected' : '');
+      b.textContent = e;
+      b.addEventListener('click', () => {
+        pendingEmoji = e;
+        document.getElementById('emojiPreview').textContent = e;
+        document.getElementById('customEmojiInput').value = '';
+        renderEmojiGrid();
+      });
+      grid.appendChild(b);
+    });
+    catDiv.innerHTML = `<div class="emoji-cat-label">${cat}</div>`;
+    catDiv.appendChild(grid);
+    wrap.appendChild(catDiv);
+  });
+}
+
+document.getElementById('editGroupBtn').addEventListener('click', () => {
+  if(state.group === '*') return;
+  const g = groups.find(x => x.slug === state.group);
+  editingGroupSlug = g.slug;
+  pendingEmoji = g.emoji || '🗂️';
+  document.getElementById('groupEditorTitle').textContent = 'Настроить группу';
+  document.getElementById('groupNameInput').value = g.display_name;
+  document.getElementById('emojiPreview').textContent = pendingEmoji;
+  document.getElementById('customEmojiInput').value = '';
+  renderEmojiGrid();
+  document.getElementById('groupEditorOverlay').classList.add('on');
+});
+
+document.getElementById('addGroupBtn').addEventListener('click', () => {
+  editingGroupSlug = null;
+  pendingEmoji = '🗂️';
+  document.getElementById('groupEditorTitle').textContent = 'Новая группа';
+  document.getElementById('groupNameInput').value = '';
+  document.getElementById('emojiPreview').textContent = pendingEmoji;
+  document.getElementById('customEmojiInput').value = '';
+  renderEmojiGrid();
+  document.getElementById('groupEditorOverlay').classList.add('on');
+});
+
+document.getElementById('customEmojiInput').addEventListener('input', e => {
+  const v = e.target.value.trim();
+  if(v){ pendingEmoji = v; document.getElementById('emojiPreview').textContent = v; }
+});
+
+document.getElementById('groupEditorCancel').addEventListener('click', () => {
+  document.getElementById('groupEditorOverlay').classList.remove('on');
+});
+
+document.getElementById('groupEditorSave').addEventListener('click', async () => {
+  const name = document.getElementById('groupNameInput').value.trim();
+  if(!name) return;
+  document.getElementById('groupEditorOverlay').classList.remove('on');
+  if(editingGroupSlug === null){
+    const resp = await apiFetch('/api/groups', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, emoji: pendingEmoji }),
+    });
+    if(!resp.ok){ alert('Не удалось создать группу'); return; }
+    const created = await resp.json();
+    state.group = created.slug;
+  } else {
+    const resp = await apiFetch('/api/groups/' + encodeURIComponent(editingGroupSlug), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: name, emoji: pendingEmoji }),
+    });
+    if(!resp.ok){ alert('Не удалось сохранить группу'); return; }
+  }
+  await loadGroups();
+  renderGroups();
+  await loadProjects();
+});
+
+(async () => {
+  const me = await requireAuth();
+  if (!me) return;
+  await loadGroups();
+  renderGroups();
+  await loadProjects();
+  if(location.hash === '#everywhere'){
+    document.getElementById('everywhereRow').click();
+  }
+})();
+</script>
+</body>
+</html>
