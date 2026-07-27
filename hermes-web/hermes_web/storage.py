@@ -118,6 +118,14 @@ def touch_chat_session(conn: sqlite3.Connection, id: str, last_message_at: float
     conn.commit()
 
 
+def get_chat_session_for_project(conn: sqlite3.Connection, user: str, project_path: str) -> Optional[dict]:
+    row = conn.execute(
+        "SELECT * FROM chat_sessions WHERE user = ? AND project_path = ? ORDER BY created_at DESC LIMIT 1",
+        (user, project_path),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_group_meta(conn: sqlite3.Connection, user: str, slug: str) -> Optional[dict]:
     row = conn.execute(
         "SELECT * FROM group_meta WHERE user = ? AND slug = ?", (user, slug)

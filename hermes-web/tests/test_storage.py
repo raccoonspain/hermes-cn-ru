@@ -121,3 +121,22 @@ def test_update_chat_session_project_path_noop_when_no_match(tmp_path):
     storage.update_chat_session_project_path(conn, "/other/path", "/new/path")
     row = storage.get_chat_session(conn, "chat1")
     assert row["project_path"] == "/old/path"
+
+
+def test_get_chat_session_for_project_returns_latest(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    storage.create_chat_session(conn, "chat1", "dem", "/p/a", "web_1", created_at=100.0)
+    storage.create_chat_session(conn, "chat2", "dem", "/p/a", "web_2", created_at=200.0)
+    row = storage.get_chat_session_for_project(conn, "dem", "/p/a")
+    assert row["id"] == "chat2"
+
+
+def test_get_chat_session_for_project_scoped_to_user(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    storage.create_chat_session(conn, "chat1", "dem", "/p/a", "web_1", created_at=100.0)
+    assert storage.get_chat_session_for_project(conn, "rost", "/p/a") is None
+
+
+def test_get_chat_session_for_project_missing_returns_none(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    assert storage.get_chat_session_for_project(conn, "dem", "/nope") is None
