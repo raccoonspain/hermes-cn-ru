@@ -15,6 +15,7 @@ import asyncio
 import datetime
 import functools
 import os
+import re
 import sys
 
 _PROJECT_INDEX_DIR = os.environ.get("PROJECT_INDEX_PLUGIN_DIR")
@@ -26,6 +27,15 @@ from project_index import core as project_index_core  # noqa: E402
 BUCKETS = ("source", "outer", "result")
 ROOT_EDITABLE_FILES = ("about.md", "AGENTS.md", "history.md")
 EDITABLE_EXTENSIONS = (".md", ".txt")
+
+_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_")
+
+
+def _add_date_prefix(name: str) -> str:
+    if _DATE_PREFIX_RE.match(name):
+        return name
+    today = datetime.date.today().isoformat()
+    return f"{today}_{name}"
 
 
 class WorkspaceError(Exception):
@@ -154,3 +164,23 @@ def make_dir(user: str, project_path: str, parent: str, name: str, config) -> di
 
     os.makedirs(target)
     return {"relative_path": os.path.relpath(target, project_root)}
+
+
+def save_upload(user: str, project_path: str, target_dir: str, filename: str, content: bytes, config) -> dict:
+    safe_name = os.path.basename(filename)
+    if not safe_name or safe_name in (".", ".."):
+        raise WorkspaceError(f"недопустимое имя файла: '{filename}'")
+
+    project_root, target_dir_candidate = resolve_file_path(user, project_path, target_dir, config)
+    _require_within_bucket(project_root, target_dir_candidate)
+
+    dated_name = _add_date_prefix(safe_name)
+    target = os.path.join(target_dir_candidate, dated_name)
+    if os.path.exists(target):
+        raise WorkspaceCollisionError(f"'{dated_name}' уже существует в '{target_dir}'")
+
+    os.makedirs(target_dir_candidate, exist_ok=True)
+    with open(target, "wb") as fh:
+        fh.write(content)
+
+    return {"relative_path": os.path.relpath(target, project_root), "size": len(content)}

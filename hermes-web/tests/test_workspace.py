@@ -1,4 +1,5 @@
 import asyncio
+import datetime as _dt
 import os
 import sys
 import threading
@@ -240,3 +241,62 @@ def test_make_dir_rejects_bad_name(tmp_path):
     _write_project(tmp_path, config, "dem/ALL/a")
     with pytest.raises(workspace.WorkspaceError):
         workspace.make_dir("dem", "dem/ALL/a", "source", "../escape", config)
+
+
+def test_save_upload_adds_date_prefix(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    result = workspace.save_upload("dem", "dem/ALL/a", "source", "scan.jpg", b"jpeg-bytes", config)
+    today = _dt.date.today().isoformat()
+    assert result["relative_path"] == f"source/{today}_scan.jpg"
+    assert result["size"] == len(b"jpeg-bytes")
+    assert (project_dir / "source" / f"{today}_scan.jpg").read_bytes() == b"jpeg-bytes"
+
+
+def test_save_upload_keeps_existing_date_prefix(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    result = workspace.save_upload("dem", "dem/ALL/a", "source", "2026-01-01_old.jpg", b"x", config)
+    assert result["relative_path"] == "source/2026-01-01_old.jpg"
+
+
+def test_save_upload_into_nested_folder(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source" / "Иванов").mkdir(parents=True)
+    result = workspace.save_upload("dem", "dem/ALL/a", "source/Иванов", "glava1.pdf", b"pdf", config)
+    assert result["relative_path"].startswith("source/Иванов/")
+
+
+def test_save_upload_bootstraps_missing_target_dir(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    workspace.save_upload("dem", "dem/ALL/a", "source/новая-папка", "x.txt", b"x", config)
+    assert (project_dir / "source" / "новая-папка").is_dir()
+
+
+def test_save_upload_collision_raises(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    workspace.save_upload("dem", "dem/ALL/a", "source", "2026-01-01_old.jpg", b"x", config)
+    with pytest.raises(workspace.WorkspaceCollisionError):
+        workspace.save_upload("dem", "dem/ALL/a", "source", "2026-01-01_old.jpg", b"y", config)
+
+
+def test_save_upload_rejects_target_outside_buckets(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.save_upload("dem", "dem/ALL/a", ".", "x.txt", b"x", config)
+
+
+def test_save_upload_strips_path_from_filename(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    today = _dt.date.today().isoformat()
+    result = workspace.save_upload("dem", "dem/ALL/a", "source", "../../etc/evil.txt", b"x", config)
+    # basename() из имени файла убрал ../../etc/ — файл лёг прямо в source/,
+    # а не по пути evil.txt из непроверенного имени.
+    assert result["relative_path"] == f"source/{today}_evil.txt"
+    assert (project_dir / "source" / f"{today}_evil.txt").read_bytes() == b"x"
+    assert list(project_dir.glob("etc")) == []
