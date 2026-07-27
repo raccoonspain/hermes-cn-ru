@@ -137,3 +137,20 @@ async def save_file(user: str, project_path: str, relative_path: str, content: s
         )
         reindexed = True
     return {"path": candidate, "reindexed": reindexed}
+
+
+def make_dir(user: str, project_path: str, parent: str, name: str, config) -> dict:
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        raise WorkspaceError(f"недопустимое имя папки: '{name}'")
+
+    project_root, parent_candidate = resolve_file_path(user, project_path, parent, config)
+    _require_within_bucket(project_root, parent_candidate)
+
+    target = os.path.realpath(os.path.join(parent_candidate, name))
+    if target != parent_candidate and not target.startswith(parent_candidate + os.sep):
+        raise WorkspaceError(f"недопустимое имя папки: '{name}'")
+    if os.path.exists(target):
+        raise WorkspaceCollisionError(f"'{name}' уже существует в '{parent}'")
+
+    os.makedirs(target)
+    return {"relative_path": os.path.relpath(target, project_root)}

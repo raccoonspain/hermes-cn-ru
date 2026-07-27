@@ -194,3 +194,49 @@ async def test_save_about_md_reindex_runs_off_event_loop(tmp_path, monkeypatch):
     await workspace.save_file("dem", "dem/ALL/a", "about.md", "текст", config)
     assert seen["thread"] is not calling_thread
     assert seen["thread"] is not threading.main_thread()
+
+
+def test_make_dir_creates_folder_inside_bucket(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    result = workspace.make_dir("dem", "dem/ALL/a", "source", "Иванов", config)
+    assert result["relative_path"] == "source/Иванов"
+    assert (project_dir / "source" / "Иванов").is_dir()
+
+
+def test_make_dir_bootstraps_missing_bucket_dir(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    assert not (project_dir / "outer").exists()
+    workspace.make_dir("dem", "dem/ALL/a", "outer", "новое", config)
+    assert (project_dir / "outer" / "новое").is_dir()
+
+
+def test_make_dir_nested_parent(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    workspace.make_dir("dem", "dem/ALL/a", "source", "Иванов", config)
+    result = workspace.make_dir("dem", "dem/ALL/a", "source/Иванов", "глава1", config)
+    assert result["relative_path"] == "source/Иванов/глава1"
+
+
+def test_make_dir_collision_raises(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    workspace.make_dir("dem", "dem/ALL/a", "source", "Иванов", config)
+    with pytest.raises(workspace.WorkspaceCollisionError):
+        workspace.make_dir("dem", "dem/ALL/a", "source", "Иванов", config)
+
+
+def test_make_dir_rejects_parent_outside_buckets(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.make_dir("dem", "dem/ALL/a", ".", "новая-папка", config)
+
+
+def test_make_dir_rejects_bad_name(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.make_dir("dem", "dem/ALL/a", "source", "../escape", config)
