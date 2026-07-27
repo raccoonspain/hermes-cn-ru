@@ -75,6 +75,12 @@ def _workspace_root(config: Config) -> str:
     return config.workspace_root or project_index_core.WORKSPACE_ROOT
 
 
+async def _new_hermes_session(http_session, config: Config) -> str:
+    hermes_session_id = f"web_{uuid.uuid4().hex}"
+    await hermes_client.create_session(http_session, config.hermes_base_url, config.hermes_api_key, hermes_session_id)
+    return hermes_session_id
+
+
 async def create_quick_chat(db_conn, http_session, config: Config, user: str) -> dict:
     today = datetime.date.today().isoformat()
     slug = f"{today}_chat-{uuid.uuid4().hex[:8]}"
@@ -86,8 +92,7 @@ async def create_quick_chat(db_conn, http_session, config: Config, user: str) ->
     # диске/в project_index не остаётся "призрачного" проекта без сессии
     # чата. При падении на любом из следующих шагов orphan-риска нет — это
     # локальные файловые/БД операции.
-    hermes_session_id = f"web_{uuid.uuid4().hex}"
-    await hermes_client.create_session(http_session, config.hermes_base_url, config.hermes_api_key, hermes_session_id)
+    hermes_session_id = await _new_hermes_session(http_session, config)
 
     os.makedirs(project_abs_path, exist_ok=True)
     now_label = datetime.datetime.now().strftime("%H:%M")
@@ -114,6 +119,26 @@ async def create_quick_chat(db_conn, http_session, config: Config, user: str) ->
         "project_path": index_result["path"],
         "hermes_session_id": hermes_session_id,
     }
+
+
+async def get_or_open_session(db_conn, http_session, config: Config, user: str, project_path: str) -> dict:
+    resolved = project_index_core.resolve_project_path(user, project_path, _workspace_root(config))
+    # get_project_detail кидает ProjectIndexError, если about.md не найден —
+    # значит это не проект, открывать нечего.
+    project_index_core.get_project_detail(user, project_path, workspace_root=_workspace_root(config))
+
+    existing = storage.get_chat_session_for_project(db_conn, user, resolved)
+    if existing is not None:
+        return {
+            "chat_session_id": existing["id"],
+            "project_path": existing["project_path"],
+            "hermes_session_id": existing["hermes_session_id"],
+        }
+
+    hermes_session_id = await _new_hermes_session(http_session, config)
+    chat_session_id = uuid.uuid4().hex
+    storage.create_chat_session(db_conn, chat_session_id, user, resolved, hermes_session_id, created_at=time.time())
+    return {"chat_session_id": chat_session_id, "project_path": resolved, "hermes_session_id": hermes_session_id}
 
 
 def _system_message_for(project_path: str) -> str:
