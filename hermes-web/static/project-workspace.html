@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes — рабочий экран проекта</title>
+<style>
+  :root{
+    --sky:#12172b; --sky-deep:#0c1020; --panel:#1a2038; --panel-2:#212949;
+    --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
+    --violet:#ad9fe6; --teal:#7fc4b2; --dim-star:#727bab;
+    --c-source:#ad9fe6; --c-outer:#7fc4b2; --c-result:#f0bb5c;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:var(--sky); color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    height:100vh; display:grid;
+    grid-template-columns:260px 1fr 360px;
+    grid-template-rows:56px 1fr;
+    grid-template-areas:"top top top" "tree chat side";
+  }
+  .topbar{
+    grid-area:top; border-bottom:1px solid var(--panel-line);
+    display:flex; align-items:center; gap:14px; padding:0 20px;
+    font-family:ui-monospace,Consolas,monospace; font-size:12.5px; color:var(--text-dim);
+  }
+  .topbar a{color:var(--text-dim); text-decoration:none}
+  .topbar a:hover{color:var(--gold)}
+  .topbar .title{color:var(--text); font-family:Georgia,serif; font-size:14.5px; font-style:italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:600px}
+
+  .tree{grid-area:tree; border-right:1px solid var(--panel-line); padding:18px 14px; overflow-y:auto}
+  .tree .glabel{font-family:ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center}
+  .tree .glabel:first-child{margin-top:0}
+  .new-folder-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
+  .new-folder-btn:hover{color:var(--text);border-color:var(--gold)}
+  .node{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-dim)}
+  .node:hover{background:var(--panel);color:var(--text)}
+  .node .ic{width:15px;text-align:center;flex-shrink:0;font-size:12px}
+  .node.folder-source .ic{color:var(--c-source)}
+  .node.folder-outer .ic{color:var(--c-outer)}
+  .node.folder-result .ic{color:var(--c-result)}
+  .node .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+
+  .chat{grid-area:chat; display:flex; flex-direction:column; min-height:0}
+  .messages{flex:1; overflow-y:auto; padding:26px 34px; display:flex; flex-direction:column; gap:20px}
+  .msg{max-width:72%; display:flex; flex-direction:column; gap:8px}
+  .msg.user{align-self:flex-end; align-items:flex-end}
+  .msg.agent{align-self:flex-start}
+  .bubble{padding:13px 16px; border-radius:14px; font-size:14px; line-height:1.55; position:relative}
+  .msg.user .bubble{background:var(--panel-2); border:1px solid var(--violet); border-bottom-right-radius:3px; white-space:pre-wrap}
+  .msg.agent .bubble{background:var(--panel); border:1px solid var(--panel-line); border-bottom-left-radius:3px}
+  .msg .meta{font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--text-dim)}
+  .msg.highlight-flash .bubble{animation:flashglow 1.6s ease}
+  @keyframes flashglow{0%{box-shadow:0 0 0 2px var(--gold)}70%{box-shadow:0 0 0 2px var(--gold)}100%{box-shadow:0 0 0 0 transparent}}
+
+  .md-rendered{font-size:14px;line-height:1.6}
+  .md-rendered h1,.md-rendered h2,.md-rendered h3{margin:0 0 8px;font-weight:600;color:var(--text);font-family:Georgia,serif}
+  .md-rendered h1{font-size:18px} .md-rendered h2{font-size:16px} .md-rendered h3{font-size:14.5px}
+  .md-rendered p{margin:0 0 10px} .md-rendered p:last-child{margin-bottom:0}
+  .md-rendered ul,.md-rendered ol{margin:0 0 10px;padding-left:20px} .md-rendered li{margin-bottom:3px}
+  .md-rendered code{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;background:var(--sky-deep);color:var(--gold);padding:1px 5px;border-radius:4px}
+  .md-rendered strong{color:var(--text);font-weight:700}
+  .md-rendered table{border-collapse:collapse;width:100%;margin:6px 0 12px;font-size:13px}
+  .md-rendered th,.md-rendered td{border:1px solid var(--panel-line);padding:6px 10px;text-align:left}
+  .md-rendered th{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);background:var(--sky-deep)}
+  .copy-btn{position:absolute;top:8px;right:8px;background:none;border:1px solid var(--panel-line);color:var(--text-dim);font-family:ui-monospace,Consolas,monospace;font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;opacity:0}
+  .bubble:hover .copy-btn{opacity:1}
+  .copy-btn:hover{color:var(--text);border-color:var(--violet)}
+  .copy-btn.copied{color:var(--teal);border-color:var(--teal);opacity:1}
+  .attach-row{display:flex;gap:8px;flex-wrap:wrap}
+  .attach-chip{display:flex;align-items:center;gap:6px;font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--panel);border:1px solid var(--panel-line);border-radius:8px;padding:5px 9px;color:var(--text-dim);cursor:pointer}
+  .attach-chip:hover{color:var(--text);border-color:var(--gold)}
+  .attach-chip::after{content:"⭳";opacity:.5;margin-left:2px}
+  .attach-chip:hover::after{opacity:1}
+  .attach-chip .sw{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+  .sw.source{background:var(--c-source)} .sw.outer{background:var(--c-outer)} .sw.result{background:var(--c-result)}
+
+  .composer{border-top:1px solid var(--panel-line); padding:14px 22px 18px}
+  .compose-attachments{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .compose-attachments .thumb{width:52px;height:52px;border-radius:8px;border:1px solid var(--panel-line);background:var(--panel) center/cover no-repeat;position:relative;overflow:hidden}
+  .upload-target-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-dim)}
+  .upload-target-row select{background:var(--panel);color:var(--text);border:1px solid var(--panel-line);border-radius:6px;font-family:inherit;font-size:11px;padding:3px 6px}
+  .compose-box{display:flex;align-items:flex-end;gap:10px;background:var(--panel);border:1px solid var(--panel-line);border-radius:14px;padding:8px 8px 8px 14px}
+  .compose-box textarea{flex:1;background:none;border:none;outline:none;resize:none;color:var(--text);font-family:Georgia,serif;font-size:14px;line-height:1.5;max-height:120px;padding:8px 0}
+  .icon-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);width:36px;height:36px;border-radius:10px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+  .icon-btn:hover{color:var(--text);border-color:var(--violet)}
+  .send-btn{background:var(--gold);border:none;color:var(--sky-deep);width:36px;height:36px;border-radius:10px;cursor:pointer;flex-shrink:0;font-size:14px}
+
+  .side{grid-area:side; border-left:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0}
+  .side-tabs{display:flex; border-bottom:1px solid var(--panel-line)}
+  .side-tabs button{flex:1;background:none;border:none;color:var(--text-dim);padding:13px 8px;cursor:pointer;font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid transparent}
+  .side-tabs button.on{color:var(--text);border-bottom-color:var(--gold)}
+  .side-pane{flex:1;overflow-y:auto;padding:16px 18px;display:none}
+  .side-pane.on{display:block}
+  .log-line{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.7;margin-bottom:10px;color:var(--text-dim)}
+  .log-line .t{color:var(--dim-star);margin-right:6px}
+  .log-line.tool{color:var(--violet)}
+  .log-line.tool::before{content:"→ "}
+  .file-row{display:flex;align-items:flex-start;gap:9px;padding:10px 0;border-bottom:1px solid var(--panel-line)}
+  .file-row .sw{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+  .file-row .info{flex:1;min-width:0}
+  .file-row .fname{font-size:12.5px;color:var(--text);word-break:break-all}
+  .file-row .fmeta{font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--text-dim);margin-top:2px}
+  .file-row .facts{display:flex;gap:4px;flex-shrink:0}
+  .file-row .facts button{background:none;border:1px solid var(--panel-line);color:var(--text-dim);width:24px;height:24px;border-radius:6px;cursor:pointer;font-size:11px}
+  .file-row .facts button:hover{color:var(--text);border-color:var(--violet)}
+  .legend{display:flex;gap:14px;font-family:ui-monospace,Consolas,monospace;font-size:10px;color:var(--text-dim);margin-bottom:14px;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .legend .sw{width:7px;height:7px;border-radius:50%}
+
+  .overlay{position:fixed;inset:0;background:rgba(6,8,16,.7);display:none;align-items:center;justify-content:center;z-index:10}
+  .overlay.on{display:flex}
+  .editor{width:640px;max-width:90vw;background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;overflow:hidden}
+  .editor-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--panel-line);font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-dim)}
+  .editor textarea{width:100%;height:340px;background:var(--sky-deep);color:var(--text);border:none;outline:none;padding:16px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;resize:none}
+  .editor-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--panel-line)}
+  .editor-foot button{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;padding:8px 14px;border-radius:8px;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <a href="home.html" title="на главную">🏠</a>
+  <a href="project-selector.html">← к проектам</a>
+  <span class="title" id="projectTitle">Загрузка…</span>
+</div>
+
+<div class="tree" id="tree"></div>
+
+<div class="chat">
+  <div class="messages" id="messages"></div>
+  <div class="composer">
+    <div class="compose-attachments" id="composeAttachments"></div>
+    <div class="upload-target-row">
+      <span>папка для вложений:</span>
+      <select id="uploadTargetSelect"></select>
+    </div>
+    <div class="compose-box">
+      <button class="icon-btn" id="attachBtn" title="прикрепить файлы">📎</button>
+      <textarea id="composeInput" rows="1" placeholder="Написать Hermes… (Ctrl+V — вставить изображение из буфера)"></textarea>
+      <button class="send-btn" id="sendBtn" title="отправить">➤</button>
+    </div>
+    <input type="file" id="fileInput" multiple style="display:none">
+  </div>
+</div>
+
+<div class="side">
+  <div class="side-tabs">
+    <button class="on" data-tab="activity">Активность агента</button>
+    <button data-tab="files">Файлы</button>
+  </div>
+  <div class="side-pane on" id="pane-activity"></div>
+  <div class="side-pane" id="pane-files"></div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="editor">
+    <div class="editor-head"><span id="editorName"></span><span>txt/md редактор</span></div>
+    <textarea id="editorText"></textarea>
+    <div class="editor-foot">
+      <button class="icon-btn" id="closeEditorBtn">Закрыть</button>
+      <button class="send-btn" id="saveEditorBtn" style="width:auto;padding:0 16px">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+let projectPath = null;
+let chatSessionId = null;
+let messages = [];
+let currentTree = null;
+let pendingAttachments = [];
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = String(s ?? '');
+  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// --- минимальный markdown-рендерер (заголовки, жирный, код, списки, таблицы) ---
+function renderMD(src){
+  const lines = src.trim().split('\n');
+  let html = ''; let i = 0;
+  const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  while(i < lines.length){
+    let line = lines[i];
+    if(/^\s*$/.test(line)){ i++; continue; }
+    if(/^#{1,3}\s+/.test(line)){
+      const level = line.match(/^#+/)[0].length;
+      html += `<h${level}>${inline(line.replace(/^#{1,3}\s+/,''))}</h${level}>`;
+      i++; continue;
+    }
+    if(/^\|/.test(line)){
+      const rows = [];
+      while(i < lines.length && /^\|/.test(lines[i])){ rows.push(lines[i]); i++; }
+      const cells = r => r.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      const head = cells(rows[0]);
+      const body = rows.slice(2).map(cells);
+      html += '<table><thead><tr>' + head.map(h=>`<th>${inline(h)}</th>`).join('') + '</tr></thead><tbody>' +
+        body.map(r=>'<tr>'+r.map(c=>`<td>${inline(c)}</td>`).join('')+'</tr>').join('') + '</tbody></table>';
+      continue;
+    }
+    if(/^[-*]\s+/.test(line)){
+      const items = [];
+      while(i < lines.length && /^[-*]\s+/.test(lines[i])){ items.push(lines[i].replace(/^[-*]\s+/,'')); i++; }
+      html += '<ul>' + items.map(it=>`<li>${inline(it)}</li>`).join('') + '</ul>';
+      continue;
+    }
+    const para = [line]; i++;
+    while(i < lines.length && !/^\s*$/.test(lines[i]) && !/^#{1,3}\s+/.test(lines[i]) && !/^\|/.test(lines[i]) && !/^[-*]\s+/.test(lines[i])){
+      para.push(lines[i]); i++;
+    }
+    html += `<p>${inline(para.join(' '))}</p>`;
+  }
+  return html;
+}
+
+const ATTACH_MARKER_RE = /\n\n📎 (.+)$/;
+
+function splitAttachments(text) {
+  const m = (text || '').match(ATTACH_MARKER_RE);
+  if (!m) return { text: text || '', attachments: [] };
+  return { text: text.slice(0, m.index), attachments: m[1].split(',').map(s => s.trim()).filter(Boolean) };
+}
+
+function bucketOf(relativePath) {
+  if (relativePath.startsWith('source/') || relativePath === 'source') return 'source';
+  if (relativePath.startsWith('outer/') || relativePath === 'outer') return 'outer';
+  if (relativePath.startsWith('result/') || relativePath === 'result') return 'result';
+  return '';
+}
+
+function iconFor(name) {
+  if (/\.(png|jpe?g|gif|webp)$/i.test(name)) return '🖼️';
+  if (/\.(md|txt)$/i.test(name)) return '📄';
+  if (/\.html?$/i.test(name)) return '🌐';
+  return '📎';
+}
+
+function formatTime(ts) {
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function downloadFile(relativePath) {
+  const params = new URLSearchParams({ path: projectPath, file: relativePath, download: '1' });
+  window.open('/api/projects/file?' + params.toString(), '_blank');
+}
+
+function jumpToMessage(idx) {
+  const target = document.getElementById('msg-' + idx);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.remove('highlight-flash'); void target.offsetWidth;
+  target.classList.add('highlight-flash');
+  setTimeout(() => target.classList.remove('highlight-flash'), 1700);
+}
+
+function renderMessages() {
+  const el = document.getElementById('messages');
+  el.innerHTML = messages.map((m, idx) => {
+    if (m.role !== 'user' && m.role !== 'assistant') return '';
+    const { text, attachments } = splitAttachments(m.content);
+    const attachRow = attachments.length
+      ? `<div class="attach-row">${attachments.map(a => `<div class="attach-chip" data-download="${escapeHtml(a)}"><span class="sw ${bucketOf(a)}"></span>${escapeHtml(a.split('/').pop())}</div>`).join('')}</div>`
+      : '';
+    if (m.role === 'user') {
+      return `<div class="msg user" id="msg-${idx}">${attachRow}<div class="bubble">${escapeHtml(text)}</div><div class="meta">${formatTime(m.timestamp)}</div></div>`;
+    }
+    return `<div class="msg agent" id="msg-${idx}">
+      <div class="bubble"><div class="md-src" hidden>${escapeHtml(text)}</div><div class="md-rendered">${renderMD(text || '')}</div><button class="copy-btn">⧉ md</button></div>
+      ${attachRow}
+      <div class="meta">${formatTime(m.timestamp)}</div>
+    </div>`;
+  }).join('');
+
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const src = btn.parentElement.querySelector('.md-src').textContent.trim();
+      navigator.clipboard.writeText(src).then(() => {
+        btn.textContent = '✓ скопировано'; btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = '⧉ md'; btn.classList.remove('copied'); }, 1500);
+      });
+    });
+  });
+  document.querySelectorAll('.attach-chip').forEach(chip => {
+    chip.addEventListener('click', () => downloadFile(chip.dataset.download));
+  });
+  el.scrollTop = el.scrollHeight;
+}
+
+function computeFileMessageIndex(tree, msgs) {
+  const bySource = {};
+  msgs.forEach((m, idx) => {
+    if (m.role !== 'user') return;
+    splitAttachments(m.content).attachments.forEach(a => { bySource[a] = idx; });
+  });
+
+  const assistantMsgs = msgs
+    .map((m, idx) => ({ idx, m }))
+    .filter(x => x.m.role === 'assistant' && x.m.timestamp);
+
+  function nearestFollowing(fileMtimeIso) {
+    const fileTime = new Date(fileMtimeIso).getTime();
+    let best = null, bestTime = null;
+    for (const { idx, m } of assistantMsgs) {
+      const t = new Date(m.timestamp).getTime();
+      if (t >= fileTime && (best === null || t < bestTime)) { best = idx; bestTime = t; }
+    }
+    return best;
+  }
+
+  const nearest = {};
+  ['outer', 'result'].forEach(bucket => {
+    (tree[bucket] || []).forEach(entry => {
+      if (bySource[entry.relative_path] === undefined) {
+        const idx = nearestFollowing(entry.mtime);
+        if (idx !== null) nearest[entry.relative_path] = idx;
+      }
+    });
+  });
+  return { bySource, nearest };
+}
+
+function renderFilesTab(tree, fileIndex) {
+  const rows = [];
+  (tree.root_files || []).forEach(f => rows.push({ relative_path: f.name, bucket: 'root', size: f.size, mtime: f.mtime }));
+  ['source', 'outer', 'result'].forEach(bucket => (tree[bucket] || []).forEach(f => rows.push({ ...f, bucket })));
+  rows.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
+
+  const legend = `<div class="legend">
+    <span><span class="sw" style="background:var(--c-source)"></span>source</span>
+    <span><span class="sw" style="background:var(--c-outer)"></span>outer</span>
+    <span><span class="sw" style="background:var(--c-result)"></span>result</span>
+  </div>`;
+
+  document.getElementById('pane-files').innerHTML = legend + rows.map(r => {
+    const idx = r.bucket === 'source' ? fileIndex.bySource[r.relative_path] : fileIndex.nearest[r.relative_path];
+    const swColor = r.bucket === 'root' ? 'var(--dim-star)' : `var(--c-${r.bucket})`;
+    return `<div class="file-row"><span class="sw" style="background:${swColor}"></span>
+      <div class="info"><div class="fname">${escapeHtml(r.relative_path)}</div><div class="fmeta">${escapeHtml(formatTime(r.mtime) || r.mtime)} · ${r.bucket} · ${r.size} B</div></div>
+      <div class="facts">
+        <button title="скачать" data-download="${escapeHtml(r.relative_path)}">⭳</button>
+        ${idx !== undefined ? `<button title="к сообщению" data-jump-idx="${idx}">↩</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  document.querySelectorAll('#pane-files [data-download]').forEach(btn => btn.addEventListener('click', () => downloadFile(btn.dataset.download)));
+  document.querySelectorAll('#pane-files [data-jump-idx]').forEach(btn => btn.addEventListener('click', () => jumpToMessage(Number(btn.dataset.jumpIdx))));
+}
+
+function buildFolderTree(entries, bucket) {
+  const root = { folders: {}, files: [], path: bucket };
+  for (const entry of entries) {
+    const parts = entry.relative_path.split('/').slice(1);
+    let node = root, accPath = bucket;
+    for (let i = 0; i < parts.length - 1; i++) {
+      accPath += '/' + parts[i];
+      if (!node.folders[parts[i]]) node.folders[parts[i]] = { folders: {}, files: [], path: accPath };
+      node = node.folders[parts[i]];
+    }
+    node.files.push({ name: parts[parts.length - 1], entry });
+  }
+  return root;
+}
+
+function renderFolderNode(node, bucketClass, depth) {
+  let html = '';
+  Object.keys(node.folders).sort().forEach(name => {
+    const child = node.folders[name];
+    html += `<div class="node folder-${bucketClass}" style="padding-left:${depth * 14}px">
+      <span class="ic">📁</span><span class="name">${escapeHtml(name)}</span>
+      <button class="new-folder-btn" data-parent="${escapeHtml(child.path)}" title="новая папка">＋</button>
+    </div>`;
+    html += renderFolderNode(child, bucketClass, depth + 1);
+  });
+  node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+    html += `<div class="node file folder-${bucketClass}" style="padding-left:${depth * 14 + 20}px" data-relpath="${escapeHtml(f.entry.relative_path)}">
+      <span class="ic">${iconFor(f.name)}</span><span class="name">${escapeHtml(f.name)}</span>
+    </div>`;
+  });
+  return html;
+}
+
+function renderTree(tree) {
+  const labels = { source: '📥 source — от человека', outer: '🔎 outer — нашёл агент', result: '✨ result — сгенерировал агент' };
+  let html = (tree.root_files || []).map(f =>
+    `<div class="node file" data-relpath="${escapeHtml(f.name)}"><span class="ic">📄</span><span class="name">${escapeHtml(f.name)}</span></div>`
+  ).join('');
+
+  ['source', 'outer', 'result'].forEach(bucket => {
+    html += `<div class="glabel">${labels[bucket]}<button class="new-folder-btn" data-parent="${bucket}" title="новая папка">＋папка</button></div>`;
+    html += renderFolderNode(buildFolderTree(tree[bucket] || [], bucket), bucket, 0);
+  });
+
+  document.getElementById('tree').innerHTML = html;
+
+  document.querySelectorAll('.tree .node.file').forEach(n => {
+    n.addEventListener('click', () => {
+      const relpath = n.dataset.relpath;
+      if (/\.(md|txt)$/i.test(relpath)) openEditor(relpath);
+      else downloadFile(relpath);
+    });
+  });
+  document.querySelectorAll('.new-folder-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const name = prompt('Имя новой папки:');
+      if (!name) return;
+      const resp = await apiFetch('/api/projects/mkdir', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: projectPath, parent: btn.dataset.parent, name }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        alert('Не удалось создать папку: ' + (body.error || resp.status));
+        return;
+      }
+      await refreshTreeAndFiles();
+    });
+  });
+}
+
+function renderFolderOptions(tree) {
+  const select = document.getElementById('uploadTargetSelect');
+  const options = [];
+  ['source', 'outer', 'result'].forEach(bucket => {
+    options.push(bucket);
+    const dirs = new Set();
+    (tree[bucket] || []).forEach(e => {
+      const parts = e.relative_path.split('/');
+      for (let i = 1; i < parts.length - 1; i++) dirs.add(parts.slice(0, i + 1).join('/'));
+    });
+    [...dirs].sort().forEach(d => options.push(d));
+  });
+  const previous = select.value;
+  select.innerHTML = options.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
+  if (options.includes(previous)) select.value = previous;
+}
+
+async function loadTreeAndRender() {
+  const resp = await apiFetch('/api/projects/tree?' + new URLSearchParams({ path: projectPath }));
+  if (resp.status === 401) { location.href = 'login.html'; return null; }
+  currentTree = await resp.json();
+  renderTree(currentTree);
+  renderFolderOptions(currentTree);
+  return currentTree;
+}
+
+async function refreshTreeAndFiles() {
+  await loadTreeAndRender();
+  if (!currentTree) return;
+  renderFilesTab(currentTree, computeFileMessageIndex(currentTree, messages));
+}
+
+async function openEditor(relpath) {
+  const resp = await apiFetch('/api/projects/file?' + new URLSearchParams({ path: projectPath, file: relpath }));
+  if (!resp.ok) { alert('Не удалось открыть файл'); return; }
+  document.getElementById('editorName').textContent = relpath;
+  document.getElementById('editorText').value = await resp.text();
+  document.getElementById('overlay').classList.add('on');
+  document.getElementById('saveEditorBtn').onclick = () => saveEditor(relpath);
+}
+
+async function saveEditor(relpath) {
+  const content = document.getElementById('editorText').value;
+  const resp = await apiFetch('/api/projects/file', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: projectPath, file: relpath, content }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    alert('Не удалось сохранить: ' + (body.error || resp.status));
+    return;
+  }
+  document.getElementById('overlay').classList.remove('on');
+  await refreshTreeAndFiles();
+}
+
+document.getElementById('closeEditorBtn').addEventListener('click', () => document.getElementById('overlay').classList.remove('on'));
+
+function clearActivity() { document.getElementById('pane-activity').innerHTML = ''; }
+
+function appendActivity(name, payload) {
+  const el = document.getElementById('pane-activity');
+  const line = document.createElement('div');
+  line.className = 'log-line' + (name.startsWith('tool.') ? ' tool' : '');
+  const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const desc = payload && payload.tool_name ? `${name} — ${payload.tool_name}` : name;
+  line.innerHTML = `<span class="t">${time}</span>${escapeHtml(desc)}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function uploadPending(files, targetDir) {
+  for (const file of files) {
+    const form = new FormData();
+    form.append('path', projectPath);
+    form.append('target_dir', targetDir);
+    form.append('file', file, file.name);
+    const resp = await apiFetch('/api/projects/upload', { method: 'POST', body: form });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      alert('Не удалось загрузить ' + file.name + ': ' + (body.error || resp.status));
+      continue;
+    }
+    const body = await resp.json();
+    pendingAttachments.push({ relative_path: body.relative_path });
+    const url = URL.createObjectURL(file);
+    const div = document.createElement('div');
+    div.className = 'thumb';
+    div.title = body.relative_path;
+    div.style.backgroundImage = `url(${url})`;
+    document.getElementById('composeAttachments').appendChild(div);
+  }
+}
+
+async function sendMessage() {
+  const input = document.getElementById('composeInput');
+  const text = input.value.trim();
+  if (!text && pendingAttachments.length === 0) return;
+  input.value = '';
+
+  let fullText = text;
+  if (pendingAttachments.length) fullText += `\n\n📎 ${pendingAttachments.map(a => a.relative_path).join(', ')}`;
+  pendingAttachments = [];
+  document.getElementById('composeAttachments').innerHTML = '';
+
+  messages.push({ role: 'user', content: fullText, timestamp: new Date().toISOString() });
+  const assistantIdx = messages.length;
+  messages.push({ role: 'assistant', content: '', timestamp: new Date().toISOString() });
+  renderMessages();
+  clearActivity();
+
+  const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/send`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: fullText }),
+  });
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (!resp.ok) {
+    messages[assistantIdx].content = 'Hermes временно недоступен, попробуйте ещё раз';
+    renderMessages();
+    return;
+  }
+  await readSSE(resp, (name, payload) => {
+    if (name === 'assistant.delta') { messages[assistantIdx].content += payload.delta || ''; renderMessages(); }
+    else if (name === 'assistant.completed' && payload.content) { messages[assistantIdx].content = payload.content; renderMessages(); }
+    else if (name === 'error') { messages[assistantIdx].content = `Ошибка: ${payload.message || 'неизвестная'}`; renderMessages(); }
+    else if (name !== 'done') { appendActivity(name, payload); }
+  });
+  await refreshTreeAndFiles();
+}
+
+document.getElementById('sendBtn').addEventListener('click', sendMessage);
+document.getElementById('composeInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+const fileInput = document.getElementById('fileInput');
+document.getElementById('attachBtn').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+  await uploadPending([...fileInput.files], document.getElementById('uploadTargetSelect').value || 'source');
+  fileInput.value = '';
+});
+document.getElementById('composeInput').addEventListener('paste', async (e) => {
+  const items = e.clipboardData ? e.clipboardData.items : [];
+  const files = [];
+  for (const it of items) if (it.type.startsWith('image/')) files.push(it.getAsFile());
+  if (files.length) await uploadPending(files, document.getElementById('uploadTargetSelect').value || 'source');
+});
+
+document.querySelectorAll('.side-tabs button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.side-tabs button').forEach(x => x.classList.remove('on'));
+    document.querySelectorAll('.side-pane').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    document.getElementById('pane-' + b.dataset.tab).classList.add('on');
+  });
+});
+
+(async () => {
+  const me = await requireAuth();
+  if (!me) return;
+  const requestedPath = new URLSearchParams(location.search).get('path');
+  if (!requestedPath) { location.href = 'project-selector.html'; return; }
+
+  const openResp = await apiFetch('/api/projects/open', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: requestedPath }),
+  });
+  if (openResp.status === 401) { location.href = 'login.html'; return; }
+  if (!openResp.ok) { alert('Проект не найден'); location.href = 'project-selector.html'; return; }
+  const openBody = await openResp.json();
+  chatSessionId = openBody.chat_session_id;
+  projectPath = openBody.project_path;
+  document.getElementById('projectTitle').textContent = projectPath;
+
+  const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
+  if (histResp.ok) {
+    const histBody = await histResp.json();
+    messages = histBody.data.filter(m => m.role === 'user' || m.role === 'assistant');
+  }
+  renderMessages();
+  await refreshTreeAndFiles();
+})();
+</script>
+</body>
+</html>
