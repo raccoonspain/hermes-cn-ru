@@ -173,6 +173,12 @@ let chatSessionId = null;
 let messages = [];
 let currentTree = null;
 let pendingAttachments = [];
+// list_tree на бэкенде отдаёт только записи файлов из os.walk — папка без
+// единого файла в ней вообще не попадает в ответ. Чтобы только что созданная
+// пустая папка сразу была видна в дереве и доступна для выбора при загрузке,
+// держим её путь здесь в рамках сессии страницы (переживёт до первого файла
+// внутри неё либо до перезагрузки страницы — это ожидаемое ограничение).
+let manuallyCreatedFolders = new Set();
 
 function escapeHtml(s) {
   const div = document.createElement('div');
@@ -184,7 +190,11 @@ function escapeHtml(s) {
 function renderMD(src){
   const lines = src.trim().split('\n');
   let html = ''; let i = 0;
-  const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Текст сообщения приходит от Hermes, который мог прочитать его из
+  // недоверенного внешнего источника (косвенная инъекция). Экранируем
+  // сырой текст ПЕРЕД тем, как оборачивать его в <code>/<strong> — иначе
+  // литеральные `<`, `>`, `&` в тексте стали бы исполняемой разметкой.
+  const inline = s => escapeHtml(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   while(i < lines.length){
     let line = lines[i];
     if(/^\s*$/.test(line)){ i++; continue; }
@@ -220,17 +230,26 @@ function renderMD(src){
 
 const ATTACH_MARKER_RE = /\n\n📎 (.+)$/;
 
-function splitAttachments(text) {
-  const m = (text || '').match(ATTACH_MARKER_RE);
-  if (!m) return { text: text || '', attachments: [] };
-  return { text: text.slice(0, m.index), attachments: m[1].split(',').map(s => s.trim()).filter(Boolean) };
-}
-
 function bucketOf(relativePath) {
   if (relativePath.startsWith('source/') || relativePath === 'source') return 'source';
   if (relativePath.startsWith('outer/') || relativePath === 'outer') return 'outer';
   if (relativePath.startsWith('result/') || relativePath === 'result') return 'result';
   return '';
+}
+
+function splitAttachments(text) {
+  const m = (text || '').match(ATTACH_MARKER_RE);
+  if (!m) return { text: text || '', attachments: [] };
+  const attachments = m[1].split(',').map(s => s.trim()).filter(Boolean);
+  // Регулярка сама по себе не отличает настоящий хвост-вложение от абзаца
+  // пользователя, который случайно начинается с "\n\n📎 " после пустой
+  // строки. Считаем совпадение вложением, только если КАЖДАЯ запись —
+  // настоящий относительный путь в одном из трёх известных бакетов;
+  // иначе не доверяем совпадению вовсе и возвращаем исходный текст как есть.
+  if (attachments.length === 0 || !attachments.every(a => bucketOf(a))) {
+    return { text: text || '', attachments: [] };
+  }
+  return { text: text.slice(0, m.index), attachments };
 }
 
 function iconFor(name) {
@@ -365,6 +384,19 @@ function buildFolderTree(entries, bucket) {
     }
     node.files.push({ name: parts[parts.length - 1], entry });
   }
+  // list_tree отдаёт только файлы из os.walk — папка без единого файла в
+  // ней вообще не приходит в ответе. Подмешиваем сюда папки, созданные в
+  // этой сессии через "＋папка", чтобы они сразу были видны в дереве.
+  manuallyCreatedFolders.forEach(fullPath => {
+    if (fullPath !== bucket && !fullPath.startsWith(bucket + '/')) return;
+    const parts = fullPath.split('/').slice(1);
+    let node = root, accPath = bucket;
+    for (const part of parts) {
+      accPath += '/' + part;
+      if (!node.folders[part]) node.folders[part] = { folders: {}, files: [], path: accPath };
+      node = node.folders[part];
+    }
+  });
   return root;
 }
 
@@ -415,11 +447,14 @@ function renderTree(tree) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: projectPath, parent: btn.dataset.parent, name }),
       });
+      if (resp.status === 401) { location.href = 'login.html'; return; }
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
         alert('Не удалось создать папку: ' + (body.error || resp.status));
         return;
       }
+      const body = await resp.json();
+      if (body.relative_path) manuallyCreatedFolders.add(body.relative_path);
       await refreshTreeAndFiles();
     });
   });
@@ -434,6 +469,14 @@ function renderFolderOptions(tree) {
     (tree[bucket] || []).forEach(e => {
       const parts = e.relative_path.split('/');
       for (let i = 1; i < parts.length - 1; i++) dirs.add(parts.slice(0, i + 1).join('/'));
+    });
+    // Папки, созданные в этой сессии и ещё не содержащие файлов, не попадают
+    // в tree[bucket] (list_tree их не видит) — добавляем их сюда вручную,
+    // иначе выбрать такую папку целью загрузки будет невозможно.
+    manuallyCreatedFolders.forEach(p => {
+      if (p !== bucket && !p.startsWith(bucket + '/')) return;
+      const parts = p.split('/');
+      for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i + 1).join('/'));
     });
     [...dirs].sort().forEach(d => options.push(d));
   });
@@ -459,6 +502,7 @@ async function refreshTreeAndFiles() {
 
 async function openEditor(relpath) {
   const resp = await apiFetch('/api/projects/file?' + new URLSearchParams({ path: projectPath, file: relpath }));
+  if (resp.status === 401) { location.href = 'login.html'; return; }
   if (!resp.ok) { alert('Не удалось открыть файл'); return; }
   document.getElementById('editorName').textContent = relpath;
   document.getElementById('editorText').value = await resp.text();
@@ -472,6 +516,7 @@ async function saveEditor(relpath) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: projectPath, file: relpath, content }),
   });
+  if (resp.status === 401) { location.href = 'login.html'; return; }
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     alert('Не удалось сохранить: ' + (body.error || resp.status));
@@ -503,6 +548,7 @@ async function uploadPending(files, targetDir) {
     form.append('target_dir', targetDir);
     form.append('file', file, file.name);
     const resp = await apiFetch('/api/projects/upload', { method: 'POST', body: form });
+    if (resp.status === 401) { location.href = 'login.html'; return; }
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       alert('Не удалось загрузить ' + file.name + ': ' + (body.error || resp.status));
