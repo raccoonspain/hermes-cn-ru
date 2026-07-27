@@ -1,5 +1,7 @@
+import asyncio
 import os
 import sys
+import threading
 
 import pytest
 
@@ -97,3 +99,98 @@ def test_list_tree_rejects_foreign_project(tmp_path):
     _write_project(tmp_path, config, "dem/ALL/a")
     with pytest.raises(project_index_core.ProjectIndexError):
         workspace.list_tree("rost", "dem/ALL/a", config)
+
+
+def test_read_file_returns_bytes(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("привет", encoding="utf-8")
+
+    result = workspace.read_file("dem", "dem/ALL/a", "source/note.txt", config)
+    assert result["content"] == "привет".encode("utf-8")
+    assert result["name"] == "note.txt"
+
+
+def test_read_file_missing_raises(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.read_file("dem", "dem/ALL/a", "source/nope.txt", config)
+
+
+@pytest.mark.asyncio
+async def test_save_file_writes_content(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+
+    result = await workspace.save_file("dem", "dem/ALL/a", "source/note.txt", "новый текст", config)
+    assert (project_dir / "source" / "note.txt").read_text(encoding="utf-8") == "новый текст"
+    assert result["reindexed"] is False
+
+
+@pytest.mark.asyncio
+async def test_save_file_rejects_non_editable_extension(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        await workspace.save_file("dem", "dem/ALL/a", "source/data.bin", "x", config)
+
+
+@pytest.mark.asyncio
+async def test_save_file_rejects_path_outside_bucket(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        await workspace.save_file("dem", "dem/ALL/a", "note.txt", "x", config)
+
+
+@pytest.mark.asyncio
+async def test_save_root_about_md_triggers_reindex(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+
+    calls = []
+
+    def fake_index_update(user, project_path, **kwargs):
+        calls.append((user, project_path))
+        return {"path": project_path, "indexed": False, "message": "ok"}
+
+    monkeypatch.setattr(workspace.project_index_core, "index_update", fake_index_update)
+
+    result = await workspace.save_file("dem", "dem/ALL/a", "about.md", "новый about", config)
+    assert result["reindexed"] is True
+    assert calls == [("dem", "dem/ALL/a")]
+    assert (project_dir / "about.md").read_text(encoding="utf-8") == "новый about"
+
+
+@pytest.mark.asyncio
+async def test_save_nested_about_md_does_not_trigger_reindex(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+
+    calls = []
+    monkeypatch.setattr(workspace.project_index_core, "index_update", lambda *a, **k: calls.append(1))
+
+    result = await workspace.save_file("dem", "dem/ALL/a", "source/about.md", "текст", config)
+    assert result["reindexed"] is False
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_save_about_md_reindex_runs_off_event_loop(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    calling_thread = threading.current_thread()
+    seen = {}
+
+    def fake_index_update(user, project_path, **kwargs):
+        seen["thread"] = threading.current_thread()
+        return {"path": project_path, "indexed": False, "message": "ok"}
+
+    monkeypatch.setattr(workspace.project_index_core, "index_update", fake_index_update)
+    await workspace.save_file("dem", "dem/ALL/a", "about.md", "текст", config)
+    assert seen["thread"] is not calling_thread
+    assert seen["thread"] is not threading.main_thread()

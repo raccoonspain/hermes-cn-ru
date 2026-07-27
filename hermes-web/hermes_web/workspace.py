@@ -11,7 +11,9 @@ more fragile than a few self-contained lines here).
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
+import functools
 import os
 import sys
 
@@ -23,6 +25,7 @@ from project_index import core as project_index_core  # noqa: E402
 
 BUCKETS = ("source", "outer", "result")
 ROOT_EDITABLE_FILES = ("about.md", "AGENTS.md", "history.md")
+EDITABLE_EXTENSIONS = (".md", ".txt")
 
 
 class WorkspaceError(Exception):
@@ -98,3 +101,39 @@ def list_tree(user: str, project_path: str, config) -> dict:
                     })
         tree[bucket] = sorted(entries, key=lambda e: e["relative_path"])
     return tree
+
+
+def read_file(user: str, project_path: str, relative_path: str, config) -> dict:
+    _, candidate = resolve_file_path(user, project_path, relative_path, config)
+    if not os.path.isfile(candidate):
+        raise WorkspaceError(f"файл не найден: {relative_path}")
+    with open(candidate, "rb") as fh:
+        content = fh.read()
+    return {"path": candidate, "name": os.path.basename(candidate), "content": content}
+
+
+async def save_file(user: str, project_path: str, relative_path: str, content: str, config) -> dict:
+    ext = os.path.splitext(relative_path)[1].lower()
+    if ext not in EDITABLE_EXTENSIONS:
+        raise WorkspaceError(f"недопустимое расширение для сохранения: {ext or '(нет)'}")
+
+    project_root, candidate = resolve_file_path(user, project_path, relative_path, config)
+    if relative_path not in ROOT_EDITABLE_FILES:
+        _require_within_bucket(project_root, candidate)
+
+    os.makedirs(os.path.dirname(candidate), exist_ok=True)
+    with open(candidate, "w", encoding="utf-8") as fh:
+        fh.write(content)
+
+    reindexed = False
+    if relative_path == "about.md":
+        loop = asyncio.get_running_loop()
+        # index_update может дойти до реального HTTP-вызова (эмбеддинг через
+        # wormsoft.ru) — тот же повод, что уже закрыт в quickchat.create_quick_chat:
+        # синхронный вызов такой длины прямо в event loop замораживает весь
+        # процесс, не только этот запрос.
+        await loop.run_in_executor(
+            None, functools.partial(project_index_core.index_update, user, project_path, **_project_index_kwargs(config)),
+        )
+        reindexed = True
+    return {"path": candidate, "reindexed": reindexed}
