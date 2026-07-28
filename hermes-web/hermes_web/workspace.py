@@ -104,16 +104,27 @@ def _iso_mtime(path: str) -> str:
     return datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.UTC).isoformat()
 
 
-def _list_misc(project_root: str) -> list:
+MISC_MAX_ENTRIES = 2000
+
+
+def _list_misc(project_root: str) -> tuple[list, bool]:
     """Модель не гарантированно кладёт готовые файлы в result/ (см.
     Проблему 4 в спеке 2026-07-28) — вместо того чтобы бороться с этим
     только промптом, показываем всё, что реально лежит в корне проекта
     и не относится к source/outer/result/служебным файлам, одним
-    дополнительным разделом. Точечные скрытые файлы (начинающиеся с '.')
-    пропускаем — это не то, что кладёт туда агент или пользователь."""
+    дополнительным разделом. Скрытые файлы и папки (начинающиеся с '.')
+    пропускаем на любом уровне вложенности — не только в корне, но и
+    внутри стрей-папок (например '.git', '.venv', случайно оставленные
+    агентом через terminal). Обход ограничен MISC_MAX_ENTRIES — случайный
+    git clone/pip install -t ./venv в корне проекта не должен грузить
+    синхронным обходом event loop на каждый рефреш дерева; возвращает
+    (entries, truncated)."""
     skip_names = set(BUCKETS) | set(ROOT_EDITABLE_FILES)
     entries = []
-    for entry_name in os.listdir(project_root):
+    truncated = False
+    for entry_name in sorted(os.listdir(project_root)):
+        if truncated:
+            break
         if entry_name in skip_names or entry_name.startswith('.'):
             continue
         full = os.path.join(project_root, entry_name)
@@ -123,16 +134,27 @@ def _list_misc(project_root: str) -> list:
                 "size": os.path.getsize(full),
                 "mtime": _iso_mtime(full),
             })
+            if len(entries) >= MISC_MAX_ENTRIES:
+                truncated = True
         elif os.path.isdir(full):
-            for dirpath, _dirnames, filenames in os.walk(full):
+            for dirpath, dirnames, filenames in os.walk(full):
+                dirnames[:] = [d for d in dirnames if not d.startswith('.')]
                 for filename in filenames:
+                    if filename.startswith('.'):
+                        continue
                     fpath = os.path.join(dirpath, filename)
                     entries.append({
                         "relative_path": os.path.relpath(fpath, project_root),
                         "size": os.path.getsize(fpath),
                         "mtime": _iso_mtime(fpath),
                     })
-    return sorted(entries, key=lambda e: e["relative_path"])
+                    if len(entries) >= MISC_MAX_ENTRIES:
+                        truncated = True
+                        break
+                if truncated:
+                    break
+    entries = sorted(entries, key=lambda e: e["relative_path"])[:MISC_MAX_ENTRIES]
+    return entries, truncated
 
 
 def list_tree(user: str, project_path: str, config) -> dict:
@@ -158,7 +180,9 @@ def list_tree(user: str, project_path: str, config) -> dict:
                         "mtime": _iso_mtime(full),
                     })
         tree[bucket] = sorted(entries, key=lambda e: e["relative_path"])
-    tree["misc"] = _list_misc(project_root)
+    misc_entries, misc_truncated = _list_misc(project_root)
+    tree["misc"] = misc_entries
+    tree["misc_truncated"] = misc_truncated
     return tree
 
 

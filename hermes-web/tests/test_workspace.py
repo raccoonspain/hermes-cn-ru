@@ -387,3 +387,39 @@ def test_list_tree_misc_excludes_buckets_and_root_editable_files(tmp_path):
 
     tree = workspace.list_tree("dem", "dem/ALL/a", config)
     assert tree["misc"] == []
+
+
+def test_list_tree_misc_excludes_hidden_paths_inside_stray_subfolder(tmp_path):
+    """Финальное ревью (Important 4): скрытые файлы/папки внутри стрей-
+    подпапки (не только в корне проекта) не должны попасть в misc — иначе
+    случайный 'stray/.git/' или 'stray/.venv/' обходится целиком."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    stray_dir = project_dir / "stray"
+    stray_dir.mkdir()
+    (stray_dir / "visible.txt").write_text("видно", encoding="utf-8")
+    (stray_dir / ".hidden.txt").write_text("скрыто", encoding="utf-8")
+    git_dir = stray_dir / ".git"
+    git_dir.mkdir()
+    (git_dir / "HEAD").write_text("ref: refs/heads/main", encoding="utf-8")
+
+    tree = workspace.list_tree("dem", "dem/ALL/a", config)
+    assert sorted(f["relative_path"] for f in tree["misc"]) == ["stray/visible.txt"]
+    assert tree["misc_truncated"] is False
+
+
+def test_list_tree_misc_truncates_when_over_limit(tmp_path, monkeypatch):
+    """Финальное ревью (Important 4): неограниченный обход misc может
+    заблокировать event loop на случайном git clone/venv в корне проекта —
+    обход должен обрываться на MISC_MAX_ENTRIES и сообщать об усечении."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    monkeypatch.setattr(workspace, "MISC_MAX_ENTRIES", 3)
+    stray_dir = project_dir / "stray"
+    stray_dir.mkdir()
+    for i in range(10):
+        (stray_dir / f"file{i}.txt").write_text("x", encoding="utf-8")
+
+    tree = workspace.list_tree("dem", "dem/ALL/a", config)
+    assert len(tree["misc"]) == 3
+    assert tree["misc_truncated"] is True
