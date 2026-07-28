@@ -358,3 +358,32 @@ def test_save_upload_strips_path_from_filename(tmp_path):
     assert result["relative_path"] == f"source/{today}_evil.txt"
     assert (project_dir / "source" / f"{today}_evil.txt").read_bytes() == b"x"
     assert list(project_dir.glob("etc")) == []
+
+
+def test_list_tree_surfaces_files_outside_buckets(tmp_path):
+    """Проблема 4 (спек 2026-07-28): агент иногда кладёт готовые файлы в
+    произвольную папку прямо в корне проекта, а не в result/ — такие файлы
+    должны быть видны в дереве и доступны для скачивания, а не пропадать
+    молча."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    stray_dir = project_dir / "3-kirik-3-23-29"
+    stray_dir.mkdir()
+    (stray_dir / "tasks.md").write_text("решение", encoding="utf-8")
+    (project_dir / "loose.txt").write_text("прямо в корне", encoding="utf-8")
+
+    tree = workspace.list_tree("dem", "dem/ALL/a", config)
+    assert sorted(f["relative_path"] for f in tree["misc"]) == [
+        "3-kirik-3-23-29/tasks.md",
+        "loose.txt",
+    ]
+
+
+def test_list_tree_misc_excludes_buckets_and_root_editable_files(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "x.txt").write_text("x", encoding="utf-8")
+
+    tree = workspace.list_tree("dem", "dem/ALL/a", config)
+    assert tree["misc"] == []

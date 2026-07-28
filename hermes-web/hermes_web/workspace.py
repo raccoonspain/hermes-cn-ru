@@ -104,6 +104,37 @@ def _iso_mtime(path: str) -> str:
     return datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.UTC).isoformat()
 
 
+def _list_misc(project_root: str) -> list:
+    """Модель не гарантированно кладёт готовые файлы в result/ (см.
+    Проблему 4 в спеке 2026-07-28) — вместо того чтобы бороться с этим
+    только промптом, показываем всё, что реально лежит в корне проекта
+    и не относится к source/outer/result/служебным файлам, одним
+    дополнительным разделом. Точечные скрытые файлы (начинающиеся с '.')
+    пропускаем — это не то, что кладёт туда агент или пользователь."""
+    skip_names = set(BUCKETS) | set(ROOT_EDITABLE_FILES)
+    entries = []
+    for entry_name in os.listdir(project_root):
+        if entry_name in skip_names or entry_name.startswith('.'):
+            continue
+        full = os.path.join(project_root, entry_name)
+        if os.path.isfile(full):
+            entries.append({
+                "relative_path": entry_name,
+                "size": os.path.getsize(full),
+                "mtime": _iso_mtime(full),
+            })
+        elif os.path.isdir(full):
+            for dirpath, _dirnames, filenames in os.walk(full):
+                for filename in filenames:
+                    fpath = os.path.join(dirpath, filename)
+                    entries.append({
+                        "relative_path": os.path.relpath(fpath, project_root),
+                        "size": os.path.getsize(fpath),
+                        "mtime": _iso_mtime(fpath),
+                    })
+    return sorted(entries, key=lambda e: e["relative_path"])
+
+
 def list_tree(user: str, project_path: str, config) -> dict:
     project_root, _ = resolve_file_path(user, project_path, ".", config)
 
@@ -127,6 +158,7 @@ def list_tree(user: str, project_path: str, config) -> dict:
                         "mtime": _iso_mtime(full),
                     })
         tree[bucket] = sorted(entries, key=lambda e: e["relative_path"])
+    tree["misc"] = _list_misc(project_root)
     return tree
 
 
