@@ -639,6 +639,7 @@ async function sendMessage() {
   messages.push({ role: 'user', content: fullText, timestamp: new Date().toISOString() });
   let assistantIdx = messages.length;
   messages.push({ role: 'assistant', content: '', timestamp: new Date().toISOString() });
+  recoveryStatus = null;
   renderMessages();
   clearActivity();
 
