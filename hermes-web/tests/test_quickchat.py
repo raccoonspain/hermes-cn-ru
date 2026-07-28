@@ -127,7 +127,8 @@ async def test_create_quick_chat_runs_index_update_without_blocking_event_loop(t
 async def test_send_message_forwards_project_path_as_system_message(tmp_path, monkeypatch):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)
-    storage.create_chat_session(conn, "chat1", "dem", "/workspace/dem/ALL/2026-07-26_x", "web_x", created_at=1.0)
+    host_project_path = str(tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_x")
+    storage.create_chat_session(conn, "chat1", "dem", host_project_path, "web_x", created_at=1.0)
 
     captured = {}
 
@@ -148,16 +149,32 @@ async def test_send_message_forwards_project_path_as_system_message(tmp_path, mo
     assert captured["hermes_session_id"] == "web_x"
     assert captured["message"] == "привет"
     assert "/workspace/dem/ALL/2026-07-26_x" in captured["system_message"]
+    assert host_project_path not in captured["system_message"]
 
     row = storage.get_chat_session(conn, "chat1")
     assert row["last_message_at"] is not None
 
 
-def test_system_message_warns_against_absolute_workspace_paths():
+def test_sandbox_project_path_replaces_workspace_root_with_container_mount(tmp_path):
+    config = _config(tmp_path)
+    host_path = str(tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_x")
+    assert quickchat._sandbox_project_path(config, host_path) == "/workspace/dem/ALL/2026-07-26_x"
+
+
+def test_sandbox_project_path_leaves_non_matching_path_untouched(tmp_path):
+    config = _config(tmp_path)
+    # Путь, не лежащий под workspace_root — не трогаем (защитный случай,
+    # не должен встречаться в реальности, но конвертер не должен упасть
+    # или вернуть мусор).
+    assert quickchat._sandbox_project_path(config, "/some/other/path") == "/some/other/path"
+
+
+def test_system_message_requires_absolute_sandbox_path():
     msg = quickchat._system_message_for("/workspace/dem/ALL/2026-07-26_x")
     assert "write_file" in msg or "read_file" in msg
-    assert "/workspace/" in msg
-    assert "относительн" in msg.lower()
+    assert "/workspace/dem/ALL/2026-07-26_x" in msg
+    assert "абсолютн" in msg.lower()
+    assert "относительн" not in msg.lower()
 
 
 def test_system_message_points_deliverables_to_result_bucket():

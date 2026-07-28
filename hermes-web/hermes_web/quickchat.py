@@ -75,6 +75,23 @@ def _workspace_root(config: Config) -> str:
     return config.workspace_root or project_index_core.WORKSPACE_ROOT
 
 
+def _sandbox_project_path(config: Config, project_path: str) -> str:
+    """Файловые инструменты Hermes (write_file/read_file) при
+    terminal.backend: docker реально исполняются внутри sandbox-контейнера,
+    где смонтированный путь проекта — всегда /workspace/... (см.
+    docker_mount_cwd_to_workspace в официальной документации Hermes), а не
+    хостовый workspace_root, под которым project_path хранится в БД.
+    Подтверждено живым тестом 2026-07-28: относительные пути и абсолютные
+    хостовые пути write_file/read_file не понимают корректно, попадают
+    мимо проекта или получают отказ — единственный надёжный вариант
+    подсказать модели путь для write_file/read_file — абсолютный,
+    начинающийся с /workspace."""
+    root = _workspace_root(config)
+    if project_path == root or project_path.startswith(root + os.sep):
+        return "/workspace" + project_path[len(root):]
+    return project_path
+
+
 async def _new_hermes_session(http_session, config: Config) -> str:
     hermes_session_id = f"web_{uuid.uuid4().hex}"
     await hermes_client.create_session(http_session, config.hermes_base_url, config.hermes_api_key, hermes_session_id)
@@ -150,15 +167,14 @@ def _system_message_for(project_path: str) -> str:
         "отображаются. Исходники — в source/, вспомогательные материалы "
         "(скачанное, промежуточное) — в outer/; внутри каждой из трёх можно "
         "заводить подпапки. "
-        "Инструментам write_file/read_file передавай путь ОТНОСИТЕЛЬНО корня "
-        "проекта (например result/solution.md), а не абсолютный "
-        f"/workspace/... путь: '/workspace/...' — это алиас, который "
-        "понимает только shell внутри terminal/execute_code, а write_file/"
-        "read_file работают с путями сервера напрямую и такой абсолютный "
-        "путь всегда сочтут вне разрешённой папки и откажут в записи. После "
-        "записи файла — проверь ответ инструмента: если он сообщил об "
-        "ошибке или отказе, файл не сохранён, не пиши пользователю, что всё "
-        "готово."
+        "Инструментам write_file/read_file передавай АБСОЛЮТНЫЙ путь, "
+        f"начинающийся строго с {project_path} (например "
+        f"{project_path}/result/solution.md). Путь без этого префикса "
+        "резолвится не от корня текущего проекта, а от другого каталога "
+        "сессии, и почти всегда попадает мимо проекта или получает отказ в "
+        "записи. После записи файла — проверь ответ инструмента: если он "
+        "сообщил об ошибке или отказе, файл не сохранён, не пиши "
+        "пользователю, что всё готово."
     )
 
 
@@ -173,7 +189,7 @@ async def send_message(db_conn, http_session, config: Config, chat_session_id: s
         config.hermes_api_key,
         row["hermes_session_id"],
         text,
-        system_message=_system_message_for(row["project_path"]),
+        system_message=_system_message_for(_sandbox_project_path(config, row["project_path"])),
     ):
         yield name, payload
 
