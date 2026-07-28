@@ -439,3 +439,276 @@ async def test_move_project_collision_returns_400(aiohttp_client, app_and_conn, 
     await client.post("/login", json={"username": "dem", "password": "secret123"})
     resp = await client.post("/api/projects/move", json={"path": "dem/ALL/a", "new_group": "1С"})
     assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_open_project_creates_session_when_authed(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_get_or_open_session(db_conn, http_session, config, user, project_path):
+        assert user == "dem"
+        assert project_path == "dem/ALL/a"
+        return {"chat_session_id": "chat1", "project_path": "/w/dem/ALL/a", "hermes_session_id": "web_1"}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.get_or_open_session", fake_get_or_open_session)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/open", json={"path": "dem/ALL/a"})
+    assert resp.status == 200
+    body = await resp.json()
+    assert body == {"chat_session_id": "chat1", "project_path": "/w/dem/ALL/a"}
+
+
+@pytest.mark.asyncio
+async def test_open_project_unknown_returns_404(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_get_or_open_session(db_conn, http_session, config, user, project_path):
+        raise projects.project_index_core.ProjectIndexError("about.md не найден")
+
+    monkeypatch.setattr("hermes_web.app.quickchat.get_or_open_session", fake_get_or_open_session)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/open", json={"path": "dem/ALL/nope"})
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_open_project_requires_auth(aiohttp_client, app_and_conn):
+    client = await aiohttp_client(app_and_conn)
+    resp = await client.post("/api/projects/open", json={"path": "dem/ALL/a"})
+    assert resp.status == 401
+
+
+@pytest.mark.asyncio
+async def test_project_tree_returns_tree(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/projects/tree?path=dem/ALL/a")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["root_files"][0]["name"] == "about.md"
+    assert body["source"] == []
+
+
+@pytest.mark.asyncio
+async def test_project_tree_cross_user_returns_404(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+    resp = await client.get("/api/projects/tree?path=dem/ALL/a")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_project_file_get_returns_content(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("привет", encoding="utf-8")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/projects/file?path=dem/ALL/a&file=source/note.txt")
+    assert resp.status == 200
+    assert (await resp.text()) == "привет"
+
+
+@pytest.mark.asyncio
+async def test_project_file_get_download_sets_content_disposition(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "result").mkdir()
+    (project_dir / "result" / "out.pdf").write_bytes(b"pdf-bytes")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/projects/file?path=dem/ALL/a&file=result/out.pdf&download=1")
+    assert resp.status == 200
+    assert "attachment" in resp.headers["Content-Disposition"]
+    assert (await resp.read()) == b"pdf-bytes"
+
+
+@pytest.mark.asyncio
+async def test_project_file_get_download_quotes_and_encodes_filename(aiohttp_client, app_and_conn, tmp_path):
+    """Finding 3 (важное, финальное ревью): раньше Content-Disposition
+    собирался f-строкой 'attachment; filename="{name}"' — кавычка в имени
+    файла ломала заголовок (можно было подмешать произвольные параметры), а
+    сырая кириллица в заголовке технически некорректна по RFC 6266 и в
+    части браузеров превращалась в кракозябры. Кладём файл с кириллическим
+    именем (реальный кейс проекта — "Иванов" и т.п.) прямо на диск (upload
+    сам добавил бы дату/basename — здесь важно только имя, которое отдаёт
+    сервер) и проверяем, что заголовок остаётся валидным одним значением и
+    несёт RFC 5987 filename*=UTF-8''..."""
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "Иванов.txt").write_text("текст", encoding="utf-8")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/projects/file?path=dem/ALL/a&file=source/Иванов.txt&download=1")
+    assert resp.status == 200
+    disposition = resp.headers["Content-Disposition"]
+    assert "attachment" in disposition
+    assert "filename*=UTF-8''" in disposition
+
+
+@pytest.mark.asyncio
+async def test_project_upload_accepts_payload_over_default_1mib_limit(aiohttp_client, app_and_conn, tmp_path):
+    """Finding 2 (важное, финальное ревью): aiohttp по умолчанию режет тело
+    запроса на 1 MiB — реальный кейс проекта (сканы книг, PDF, скриншоты)
+    регулярно больше. create_app теперь передаёт client_max_size=64 MiB."""
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+
+    big_content = b"x" * (2 * 1024 * 1024)  # 2 MiB — больше дефолтного лимита aiohttp
+    form = aiohttp.FormData()
+    form.add_field("path", "dem/ALL/a")
+    form.add_field("target_dir", "source")
+    form.add_field("file", big_content, filename="big-scan.jpg", content_type="image/jpeg")
+    resp = await client.post("/api/projects/upload", data=form)
+    assert resp.status == 200
+
+
+@pytest.mark.asyncio
+async def test_project_file_get_cross_user_returns_404(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+    resp = await client.get("/api/projects/file?path=dem/ALL/a&file=about.md")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_project_file_get_traversal_returns_404(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.get("/api/projects/file?path=dem/ALL/a&file=../../../etc/passwd")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_project_file_post_cross_user_returns_404(aiohttp_client, app_and_conn, tmp_path):
+    """Finding 7 (важное, финальное ревью): GET-эндпоинты уже пинили
+    межпользовательскую изоляцию тестами, POST-эндпоинты — нет. Ростислав
+    не должен мочь дописать в about.md проекта Дмитрия."""
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    original = (project_dir / "about.md").read_text(encoding="utf-8")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+    resp = await client.post("/api/projects/file", json={"path": "dem/ALL/a", "file": "about.md", "content": "pwned"})
+
+    assert resp.status == 404
+    assert (project_dir / "about.md").read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
+async def test_project_mkdir_cross_user_returns_404(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+    resp = await client.post("/api/projects/mkdir", json={"path": "dem/ALL/a", "parent": "source", "name": "pwned"})
+
+    assert resp.status == 404
+    assert not (project_dir / "source").exists()
+
+
+@pytest.mark.asyncio
+async def test_project_upload_cross_user_returns_404(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+
+    form = aiohttp.FormData()
+    form.add_field("path", "dem/ALL/a")
+    form.add_field("target_dir", "source")
+    form.add_field("file", b"pwned-bytes", filename="pwn.jpg", content_type="image/jpeg")
+    resp = await client.post("/api/projects/upload", data=form)
+
+    assert resp.status == 404
+    assert not (project_dir / "source").exists()
+
+
+@pytest.mark.asyncio
+async def test_project_file_post_saves_content(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/file", json={"path": "dem/ALL/a", "file": "source/note.txt", "content": "текст"})
+    assert resp.status == 200
+    assert (project_dir / "source" / "note.txt").read_text(encoding="utf-8") == "текст"
+
+
+@pytest.mark.asyncio
+async def test_project_file_post_bad_extension_returns_400(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/file", json={"path": "dem/ALL/a", "file": "source/data.bin", "content": "x"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_project_mkdir_creates_folder(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/mkdir", json={"path": "dem/ALL/a", "parent": "source", "name": "Иванов"})
+    assert resp.status == 200
+    assert (project_dir / "source" / "Иванов").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_project_mkdir_collision_returns_409(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    await client.post("/api/projects/mkdir", json={"path": "dem/ALL/a", "parent": "source", "name": "Иванов"})
+    resp = await client.post("/api/projects/mkdir", json={"path": "dem/ALL/a", "parent": "source", "name": "Иванов"})
+    assert resp.status == 409
+
+
+@pytest.mark.asyncio
+async def test_project_mkdir_outside_buckets_returns_400(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/mkdir", json={"path": "dem/ALL/a", "parent": ".", "name": "x"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_project_upload_saves_file_with_date_prefix(aiohttp_client, app_and_conn, tmp_path):
+    import datetime as _dt
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+
+    form = aiohttp.FormData()
+    form.add_field("path", "dem/ALL/a")
+    form.add_field("target_dir", "source")
+    form.add_field("file", b"jpeg-bytes", filename="scan.jpg", content_type="image/jpeg")
+    resp = await client.post("/api/projects/upload", data=form)
+    assert resp.status == 200
+    body = await resp.json()
+    today = _dt.date.today().isoformat()
+    assert body["relative_path"] == f"source/{today}_scan.jpg"
+    assert (project_dir / "source" / f"{today}_scan.jpg").read_bytes() == b"jpeg-bytes"
+
+
+@pytest.mark.asyncio
+async def test_project_upload_collision_returns_409(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+
+    async def upload():
+        form = aiohttp.FormData()
+        form.add_field("path", "dem/ALL/a")
+        form.add_field("target_dir", "source")
+        form.add_field("file", b"x", filename="2026-01-01_dup.jpg")
+        return await client.post("/api/projects/upload", data=form)
+
+    assert (await upload()).status == 200
+    assert (await upload()).status == 409

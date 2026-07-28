@@ -186,3 +186,80 @@ async def test_get_history_unknown_chat_session_raises(tmp_path):
 
     with pytest.raises(quickchat.QuickChatError):
         await quickchat.get_history(conn, http_session=None, config=config, chat_session_id="nope")
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_creates_new_session_for_existing_project(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+
+    created_sessions = []
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        created_sessions.append(session_id)
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    result = await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert result["hermes_session_id"] == created_sessions[0]
+    row = storage.get_chat_session(conn, result["chat_session_id"])
+    assert row["project_path"] == str(project_dir)
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_reuses_existing_session(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+    storage.create_chat_session(conn, "chat1", "dem", str(project_dir), "web_existing", created_at=1.0)
+
+    async def failing_create_session(*args, **kwargs):
+        raise AssertionError("не должно вызываться повторно для уже открытого проекта")
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", failing_create_session)
+
+    result = await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert result["chat_session_id"] == "chat1"
+    assert result["hermes_session_id"] == "web_existing"
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_unknown_project_raises(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    with pytest.raises(quickchat.project_index_core.ProjectIndexError):
+        await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/nope")
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_leaves_no_orphan_when_hermes_fails(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+
+    async def failing_create_session(http_session, base_url, api_key, session_id):
+        raise hermes_client.HermesClientError("create_session failed: 503")
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", failing_create_session)
+
+    with pytest.raises(hermes_client.HermesClientError):
+        await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert storage.get_chat_session_for_project(conn, "dem", str(project_dir)) is None

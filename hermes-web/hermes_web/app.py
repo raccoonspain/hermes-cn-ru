@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
+import urllib.parse
 
 import aiohttp
 from aiohttp import web
 
-from . import auth, hermes_client, projects, quickchat, storage
+from . import auth, hermes_client, projects, quickchat, storage, workspace
 
 COOKIE_NAME = "hermes_web_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 дней
@@ -240,6 +242,135 @@ async def handle_move_project(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def handle_open_project(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    path = str(body.get("path", ""))
+    try:
+        result = await quickchat.get_or_open_session(
+            request.app["db"], request.app["http_session"], request.app["quickchat_config"], user["username"], path,
+        )
+    except quickchat.project_index_core.ProjectIndexError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    return web.json_response({"chat_session_id": result["chat_session_id"], "project_path": result["project_path"]})
+
+
+async def handle_project_tree(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    path = request.query.get("path", "")
+    try:
+        tree = workspace.list_tree(user["username"], path, request.app["quickchat_config"])
+    except (projects.project_index_core.ProjectIndexError, workspace.WorkspaceError):
+        return web.json_response({"error": "not found"}, status=404)
+    return web.json_response(tree)
+
+
+async def handle_project_file_get(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    path = request.query.get("path", "")
+    file_param = request.query.get("file", "")
+    download = request.query.get("download") == "1"
+    try:
+        _, candidate = workspace.resolve_file_path(user["username"], path, file_param, request.app["quickchat_config"])
+        if not os.path.isfile(candidate):
+            raise workspace.WorkspaceError(f"файл не найден: {file_param}")
+    except (projects.project_index_core.ProjectIndexError, workspace.WorkspaceError):
+        return web.json_response({"error": "not found"}, status=404)
+
+    name = os.path.basename(candidate)
+    headers: dict[str, str] = {}
+    if download:
+        # aiohttp.helpers.content_disposition_header вместо ручного f-string:
+        # правильно квотирует " (иначе имя файла с кавычкой ломает заголовок
+        # и позволяет подмешать произвольные параметры) и percent-encodes
+        # \r\n (голый f-string с CR/LF в имени файла роняет aiohttp
+        # необработанным ValueError и рвёт соединение). Для 'filename' этот
+        # хелпер по историческим причинам (см. RFC 7578, multipart/form-data)
+        # всегда отдаёт percent-encoded ASCII внутри filename="...", а не
+        # RFC 5987 filename* — но именно filename* браузеры реально
+        # декодируют обратно в UTF-8; голый filename="%D0%98..." они не
+        # раскодируют и сохранят файл с процентами в имени. Поэтому кириллицу
+        # (реальный кейс проекта — "Иванов" и т.п.) выражаем ещё и через
+        # filename* по RFC 6266 §5: 'filename' остаётся ASCII-safe фолбэком
+        # для старых клиентов, 'filename*' берёт приоритет в современных.
+        disposition = aiohttp.helpers.content_disposition_header("attachment", filename=name)
+        if not name.isascii():
+            disposition += f"; filename*=UTF-8''{urllib.parse.quote(name, safe='')}"
+        headers["Content-Disposition"] = disposition
+    elif os.path.splitext(name)[1].lower() in (".md", ".txt"):
+        headers["Content-Type"] = "text/plain; charset=utf-8"
+
+    # web.FileResponse стримит файл через sendfile вместо синхронного
+    # open().read() всего содержимого в память — важно, потому что файлы в
+    # result/outer пишет сам агент и их размер ничем не ограничен (в отличие
+    # от upload, теперь капнутого на UPLOAD_MAX_SIZE); синхронное чтение
+    # большого файла блокирует единственный event loop aiohttp сразу для
+    # всех пользователей, не только для этого запроса.
+    return web.FileResponse(candidate, headers=headers)
+
+
+async def handle_project_file_post(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    path = str(body.get("path", ""))
+    file_param = str(body.get("file", ""))
+    content = str(body.get("content", ""))
+    try:
+        result = await workspace.save_file(user["username"], path, file_param, content, request.app["quickchat_config"])
+    except workspace.WorkspaceError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except projects.project_index_core.ProjectIndexError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    return web.json_response(result)
+
+
+async def handle_project_mkdir(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    path = str(body.get("path", ""))
+    parent = str(body.get("parent", ""))
+    name = str(body.get("name", ""))
+    try:
+        result = workspace.make_dir(user["username"], path, parent, name, request.app["quickchat_config"])
+    except workspace.WorkspaceCollisionError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except workspace.WorkspaceError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except projects.project_index_core.ProjectIndexError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    return web.json_response(result)
+
+
+async def handle_project_upload(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    reader = await request.multipart()
+    path = None
+    target_dir = None
+    filename = None
+    content = b""
+    async for field in reader:
+        if field.name == "path":
+            path = (await field.read()).decode("utf-8")
+        elif field.name == "target_dir":
+            target_dir = (await field.read()).decode("utf-8")
+        elif field.name == "file":
+            filename = field.filename
+            content = await field.read()
+
+    if not path or not target_dir or not filename:
+        return web.json_response({"error": "path, target_dir и file обязательны"}, status=400)
+
+    try:
+        result = workspace.save_upload(user["username"], path, target_dir, filename, content, request.app["quickchat_config"])
+    except workspace.WorkspaceCollisionError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except workspace.WorkspaceError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except projects.project_index_core.ProjectIndexError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    return web.json_response(result)
+
+
 async def _on_startup(app: web.Application) -> None:
     # aiohttp.ClientSession() requires a running event loop (aiohttp >= 4-style
     # behaviour, already true in 3.14) — create_app() itself is a plain sync
@@ -262,8 +393,17 @@ async def _on_cleanup(app: web.Application) -> None:
     await app["http_session"].close()
 
 
+UPLOAD_MAX_SIZE = 64 * 1024 * 1024  # 64 MiB — сканы учебников/PDF/скриншоты
+
+
 def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secure: bool = True, static_dir: str) -> web.Application:
-    app = web.Application(middlewares=[auth_middleware])
+    # aiohttp по умолчанию режет тело запроса на 1 MiB (client_max_size) — для
+    # /api/projects/upload этого достаточно только для мелких скриншотов;
+    # реальный кейс проекта (сканы книг, PDF) регулярно больше. Лимит общий
+    # на всё приложение (aiohttp не даёт настроить его per-route без ручного
+    # чтения тела самому), но остальные эндпоинты — небольшие JSON-запросы,
+    # так что поднятие лимита им не вредит.
+    app = web.Application(middlewares=[auth_middleware], client_max_size=UPLOAD_MAX_SIZE)
     app["db"] = storage.get_connection(db_path)
     app["quickchat_config"] = quickchat_config
     app["cookie_secure"] = cookie_secure
@@ -284,6 +424,12 @@ def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secur
     app.router.add_get("/api/projects/detail", handle_project_detail)
     app.router.add_post("/api/projects/search", handle_search_projects)
     app.router.add_post("/api/projects/move", handle_move_project)
+    app.router.add_post("/api/projects/open", handle_open_project)
+    app.router.add_get("/api/projects/tree", handle_project_tree)
+    app.router.add_get("/api/projects/file", handle_project_file_get)
+    app.router.add_post("/api/projects/file", handle_project_file_post)
+    app.router.add_post("/api/projects/mkdir", handle_project_mkdir)
+    app.router.add_post("/api/projects/upload", handle_project_upload)
     app.router.add_get("/", handle_root)
     app.router.add_static("/", static_dir, show_index=False)
     return app

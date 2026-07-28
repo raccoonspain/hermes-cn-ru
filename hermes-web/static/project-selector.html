@@ -451,7 +451,7 @@ function renderPanel(p, detail){
     </div>
   `;
   document.getElementById('openProjectBtn').addEventListener('click', () => {
-    alert('Полноценный экран проекта появится в следующем срезе.');
+    location.href = 'project-workspace.html?path=' + encodeURIComponent(p.path);
   });
   document.getElementById('movePanelBtn').addEventListener('click', () => openMoveModal(p));
 }
