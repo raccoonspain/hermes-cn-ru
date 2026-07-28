@@ -102,6 +102,38 @@ def test_list_tree_rejects_foreign_project(tmp_path):
         workspace.list_tree("rost", "dem/ALL/a", config)
 
 
+def test_list_tree_rejects_bare_user_root(tmp_path):
+    """Finding 4 (важное, финальное ревью): user-root проходит слой-1
+    проверку resolve_project_path (это часть пространства пользователя),
+    но проектом не является — про него нет about.md. Должно падать так
+    же, как для несуществующего проекта, а не отдавать пустое дерево."""
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    (tmp_path / "workspace" / "dem").mkdir(parents=True, exist_ok=True)
+    with pytest.raises(project_index_core.ProjectIndexError):
+        workspace.list_tree("dem", "dem", config)
+
+
+def test_list_tree_rejects_bare_group_dir(tmp_path):
+    """То же самое для группы: dem/ALL — папка-контейнер для проектов,
+    у неё самой about.md нет."""
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(project_index_core.ProjectIndexError):
+        workspace.list_tree("dem", "dem/ALL", config)
+
+
+def test_make_dir_rejects_bare_group_dir(tmp_path):
+    """До фикса Finding 4: POST /api/projects/mkdir с path=dem/ALL (группа,
+    не проект) создавал директорию прямо под user-root/группой, и та потом
+    ошибочно всплывала в /api/groups как "проект". Теперь должно падать
+    как для несуществующего проекта."""
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(project_index_core.ProjectIndexError):
+        workspace.make_dir("dem", "dem/ALL", "source", "pwned", config)
+
+
 def test_read_file_returns_bytes(tmp_path):
     config = _config(tmp_path)
     project_dir = _write_project(tmp_path, config, "dem/ALL/a")
@@ -288,6 +320,32 @@ def test_save_upload_rejects_target_outside_buckets(tmp_path):
     _write_project(tmp_path, config, "dem/ALL/a")
     with pytest.raises(workspace.WorkspaceError):
         workspace.save_upload("dem", "dem/ALL/a", ".", "x.txt", b"x", config)
+
+
+def test_save_upload_rejects_dangling_symlink_target(tmp_path):
+    """Finding 1 (critical, финальное ревью): Hermes пишет в свою песочницу
+    сам (D-004) и мог бы заранее подложить dangling symlink с именем,
+    которое upload соберёт как dated_name, указывающий за пределы
+    write-safe-root. Раньше os.path.exists() на такой цели возвращал
+    False (dangling — файла-то нет), проверка коллизии проходила, и
+    open(target, "wb") молча писал содержимое загрузки ЧЕРЕЗ линк наружу.
+    С O_EXCL|O_NOFOLLOW открытие такой цели должно упасть, а сама цель
+    ссылки — остаться нетронутой."""
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    escape_target = tmp_path / "outside_escape.txt"
+    assert not escape_target.exists()
+
+    today = _dt.date.today().isoformat()
+    dated_name = f"{today}_pwn.txt"
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    (project_dir / "source").mkdir(parents=True, exist_ok=True)
+    os.symlink(str(escape_target), str(project_dir / "source" / dated_name))
+
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.save_upload("dem", "dem/ALL/a", "source", "pwn.txt", b"attacker-controlled", config)
+
+    assert not escape_target.exists()
 
 
 def test_save_upload_strips_path_from_filename(tmp_path):

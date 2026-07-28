@@ -67,8 +67,20 @@ def resolve_file_path(user: str, project_path: str, relative_path: str, config) 
     закрыт path-traversal баг, который реально эксплуатировали в
     move_project), запрошенный файл не выходит за пределы этого
     проекта (слой 2). Возвращает (project_root, candidate), оба —
-    os.path.realpath."""
+    os.path.realpath.
+
+    Слой 1 сам по себе проверяет только "путь внутри пространства
+    пользователя" — этого мало: любая директория под user-root (сам
+    user-root, "группа" — просто подпапка без проекта внутри) тоже
+    проходит эту проверку, хотя проектом не является. Поэтому здесь же
+    дополнительно требуем about.md — как это уже делает
+    project_index_core._read_about для get_project_detail/index_update —
+    и поднимаем тот же ProjectIndexError, чтобы поведение (и HTTP-код)
+    было одинаковым что для /api/projects/open, что для этих операций."""
     project_root = project_index_core.resolve_project_path(user, project_path, _workspace_root(config))
+    about_path = os.path.join(project_root, "about.md")
+    if not os.path.isfile(about_path):
+        raise project_index_core.ProjectIndexError(f"about.md не найден: {about_path}")
     candidate = os.path.realpath(os.path.join(project_root, relative_path))
     if candidate != project_root and not candidate.startswith(project_root + os.sep):
         raise WorkspaceError(f"'{relative_path}' выходит за пределы проекта")
@@ -84,7 +96,12 @@ def _require_within_bucket(project_root: str, candidate: str) -> None:
 
 
 def _iso_mtime(path: str) -> str:
-    return datetime.datetime.utcfromtimestamp(os.path.getmtime(path)).isoformat()
+    # Naive ISO (без офсета) парсится JS-датой как local time, а не UTC —
+    # фронтенд (formatTime/computeFileMessageIndex в project-workspace.html)
+    # сравнивает эту метку с timestamp'ами сообщений Hermes, которые ВСЕГДА
+    # приходят с суффиксом UTC. datetime.UTC добавляет "+00:00", закрывая
+    # рассинхронизацию систем отсчёта (и заодно deprecated utcfromtimestamp).
+    return datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.UTC).isoformat()
 
 
 def list_tree(user: str, project_path: str, config) -> dict:
@@ -176,11 +193,28 @@ def save_upload(user: str, project_path: str, target_dir: str, filename: str, co
 
     dated_name = _add_date_prefix(safe_name)
     target = os.path.join(target_dir_candidate, dated_name)
-    if os.path.exists(target):
-        raise WorkspaceCollisionError(f"'{dated_name}' уже существует в '{target_dir}'")
 
     os.makedirs(target_dir_candidate, exist_ok=True)
-    with open(target, "wb") as fh:
+    # O_EXCL|O_NOFOLLOW вместо os.path.exists()-проверки + open("wb"):
+    #  - O_EXCL закрывает TOCTOU между проверкой коллизии и записью
+    #    (см. make_dir/save_upload race, отмеченный в финальном ревью);
+    #  - O_NOFOLLOW не даёт открыть target, если это symlink — иначе Hermes
+    #    (пишет в свою песочницу сам, см. D-004) мог бы заранее подложить
+    #    dangling symlink source/<та же dated_name> -> /home/hermes/.hermes/...
+    #    и наш "безобидный" open("wb") записал бы содержимое загрузки через
+    #    линк за пределы проекта/write-safe-root. os.path.exists() следует
+    #    по символической ссылке и раньше "успешно" ловил только коллизию с
+    #    реальным файлом — с dangling-целью запись проходила молча.
+    try:
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    except FileExistsError:
+        raise WorkspaceCollisionError(f"'{dated_name}' уже существует в '{target_dir}'")
+    except OSError as exc:
+        # ELOOP (symlink с O_NOFOLLOW) и прочие неожиданные ошибки открытия —
+        # не даём голому OSError всплыть до HTTP-слоя как 500.
+        raise WorkspaceError(f"не удалось сохранить '{dated_name}': {exc}") from exc
+
+    with os.fdopen(fd, "wb") as fh:
         fh.write(content)
 
     return {"relative_path": os.path.relpath(target, project_root), "size": len(content)}

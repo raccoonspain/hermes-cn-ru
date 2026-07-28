@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import time
+import urllib.parse
 
 import aiohttp
 from aiohttp import web
@@ -270,19 +271,42 @@ async def handle_project_file_get(request: web.Request) -> web.Response:
     file_param = request.query.get("file", "")
     download = request.query.get("download") == "1"
     try:
-        result = workspace.read_file(user["username"], path, file_param, request.app["quickchat_config"])
+        _, candidate = workspace.resolve_file_path(user["username"], path, file_param, request.app["quickchat_config"])
+        if not os.path.isfile(candidate):
+            raise workspace.WorkspaceError(f"файл не найден: {file_param}")
     except (projects.project_index_core.ProjectIndexError, workspace.WorkspaceError):
         return web.json_response({"error": "not found"}, status=404)
 
-    headers = {}
-    content_type = "application/octet-stream"
-    charset = None
+    name = os.path.basename(candidate)
+    headers: dict[str, str] = {}
     if download:
-        headers["Content-Disposition"] = f'attachment; filename="{result["name"]}"'
-    elif os.path.splitext(result["name"])[1].lower() in (".md", ".txt"):
-        content_type = "text/plain"
-        charset = "utf-8"
-    return web.Response(body=result["content"], headers=headers, content_type=content_type, charset=charset)
+        # aiohttp.helpers.content_disposition_header вместо ручного f-string:
+        # правильно квотирует " (иначе имя файла с кавычкой ломает заголовок
+        # и позволяет подмешать произвольные параметры) и percent-encodes
+        # \r\n (голый f-string с CR/LF в имени файла роняет aiohttp
+        # необработанным ValueError и рвёт соединение). Для 'filename' этот
+        # хелпер по историческим причинам (см. RFC 7578, multipart/form-data)
+        # всегда отдаёт percent-encoded ASCII внутри filename="...", а не
+        # RFC 5987 filename* — но именно filename* браузеры реально
+        # декодируют обратно в UTF-8; голый filename="%D0%98..." они не
+        # раскодируют и сохранят файл с процентами в имени. Поэтому кириллицу
+        # (реальный кейс проекта — "Иванов" и т.п.) выражаем ещё и через
+        # filename* по RFC 6266 §5: 'filename' остаётся ASCII-safe фолбэком
+        # для старых клиентов, 'filename*' берёт приоритет в современных.
+        disposition = aiohttp.helpers.content_disposition_header("attachment", filename=name)
+        if not name.isascii():
+            disposition += f"; filename*=UTF-8''{urllib.parse.quote(name, safe='')}"
+        headers["Content-Disposition"] = disposition
+    elif os.path.splitext(name)[1].lower() in (".md", ".txt"):
+        headers["Content-Type"] = "text/plain; charset=utf-8"
+
+    # web.FileResponse стримит файл через sendfile вместо синхронного
+    # open().read() всего содержимого в память — важно, потому что файлы в
+    # result/outer пишет сам агент и их размер ничем не ограничен (в отличие
+    # от upload, теперь капнутого на UPLOAD_MAX_SIZE); синхронное чтение
+    # большого файла блокирует единственный event loop aiohttp сразу для
+    # всех пользователей, не только для этого запроса.
+    return web.FileResponse(candidate, headers=headers)
 
 
 async def handle_project_file_post(request: web.Request) -> web.Response:
@@ -369,8 +393,17 @@ async def _on_cleanup(app: web.Application) -> None:
     await app["http_session"].close()
 
 
+UPLOAD_MAX_SIZE = 64 * 1024 * 1024  # 64 MiB — сканы учебников/PDF/скриншоты
+
+
 def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secure: bool = True, static_dir: str) -> web.Application:
-    app = web.Application(middlewares=[auth_middleware])
+    # aiohttp по умолчанию режет тело запроса на 1 MiB (client_max_size) — для
+    # /api/projects/upload этого достаточно только для мелких скриншотов;
+    # реальный кейс проекта (сканы книг, PDF) регулярно больше. Лимит общий
+    # на всё приложение (aiohttp не даёт настроить его per-route без ручного
+    # чтения тела самому), но остальные эндпоинты — небольшие JSON-запросы,
+    # так что поднятие лимита им не вредит.
+    app = web.Application(middlewares=[auth_middleware], client_max_size=UPLOAD_MAX_SIZE)
     app["db"] = storage.get_connection(db_path)
     app["quickchat_config"] = quickchat_config
     app["cookie_secure"] = cookie_secure
