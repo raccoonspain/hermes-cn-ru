@@ -9,7 +9,7 @@
     --sky:#12172b; --sky-deep:#0c1020; --panel:#1a2038; --panel-2:#212949;
     --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
     --violet:#ad9fe6; --teal:#7fc4b2; --dim-star:#727bab;
-    --c-source:#ad9fe6; --c-outer:#7fc4b2; --c-result:#f0bb5c;
+    --c-source:#ad9fe6; --c-outer:#7fc4b2; --c-result:#f0bb5c; --c-misc:#8b93bf;
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;height:100%}
@@ -41,6 +41,7 @@
   .node.folder-source .ic{color:var(--c-source)}
   .node.folder-outer .ic{color:var(--c-outer)}
   .node.folder-result .ic{color:var(--c-result)}
+  .node.folder-misc .ic{color:var(--c-misc)}
   .node .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 
   .chat{grid-area:chat; display:flex; flex-direction:column; min-height:0}
@@ -171,6 +172,12 @@
 let projectPath = null;
 let chatSessionId = null;
 let messages = [];
+// Индикатор восстановления после обрыва SSE-потока (recoverAfterStreamDrop) —
+// показывается отдельной строкой в конце ленты сообщений, но НЕ хранится в
+// messages: recoverAfterStreamDrop целиком переприсваивает этот массив на
+// каждый опрос истории, так что любой текст, записанный внутрь messages,
+// был бы стёрт первым же успешным ответом сервера. null — индикатор скрыт.
+let recoveryStatus = null;
 let currentTree = null;
 let pendingAttachments = [];
 // list_tree на бэкенде отдаёт только записи файлов из os.walk — папка без
@@ -259,8 +266,16 @@ function iconFor(name) {
   return '📎';
 }
 
+function hermesTimestampToDate(ts) {
+  // Hermes отдаёт timestamp сообщений как Unix-секунды (число); клиентские
+  // метки (оптимистичная вставка) и mtime файлов — уже ISO-строки. Общая
+  // точка разбора для formatTime() и computeFileMessageIndex() — раньше
+  // тот же баг чинили только в formatTime(), тут он остался.
+  return typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
+}
+
 function formatTime(ts) {
-  const d = new Date(ts);
+  const d = hermesTimestampToDate(ts);
   return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
@@ -283,6 +298,11 @@ function renderMessages() {
   el.innerHTML = messages.map((m, idx) => {
     if (m.role !== 'user' && m.role !== 'assistant') return '';
     const { text, attachments } = splitAttachments(m.content);
+    // Hermes хранит каждый шаг tool-calling цикла отдельным assistant-
+    // сообщением — часть из них легитимно пустые (модель молча вызвала
+    // инструмент, ничего не написав). Рендерить такие как пустую тёмную
+    // капсулу нечего — пропускаем узел целиком, не трогая индексацию.
+    if (m.role === 'assistant' && !text.trim() && attachments.length === 0) return '';
     const attachRow = attachments.length
       ? `<div class="attach-row">${attachments.map(a => `<div class="attach-chip" data-download="${escapeHtml(a)}"><span class="sw ${bucketOf(a)}"></span>${escapeHtml(a.split('/').pop())}</div>`).join('')}</div>`
       : '';
@@ -308,6 +328,9 @@ function renderMessages() {
   document.querySelectorAll('.attach-chip').forEach(chip => {
     chip.addEventListener('click', () => downloadFile(chip.dataset.download));
   });
+  if (recoveryStatus) {
+    el.innerHTML += `<div class="meta" style="padding:8px 12px;font-style:italic;opacity:.8">${escapeHtml(recoveryStatus)}</div>`;
+  }
   el.scrollTop = el.scrollHeight;
 }
 
@@ -320,20 +343,24 @@ function computeFileMessageIndex(tree, msgs) {
 
   const assistantMsgs = msgs
     .map((m, idx) => ({ idx, m }))
-    .filter(x => x.m.role === 'assistant' && x.m.timestamp);
+    .filter(x => {
+      if (x.m.role !== 'assistant' || !x.m.timestamp) return false;
+      const { text, attachments } = splitAttachments(x.m.content);
+      return text.trim() || attachments.length > 0;
+    });
 
   function nearestFollowing(fileMtimeIso) {
     const fileTime = new Date(fileMtimeIso).getTime();
     let best = null, bestTime = null;
     for (const { idx, m } of assistantMsgs) {
-      const t = new Date(m.timestamp).getTime();
+      const t = hermesTimestampToDate(m.timestamp).getTime();
       if (t >= fileTime && (best === null || t < bestTime)) { best = idx; bestTime = t; }
     }
     return best;
   }
 
   const nearest = {};
-  ['outer', 'result'].forEach(bucket => {
+  ['outer', 'result', 'misc'].forEach(bucket => {
     (tree[bucket] || []).forEach(entry => {
       if (bySource[entry.relative_path] === undefined) {
         const idx = nearestFollowing(entry.mtime);
@@ -347,13 +374,14 @@ function computeFileMessageIndex(tree, msgs) {
 function renderFilesTab(tree, fileIndex) {
   const rows = [];
   (tree.root_files || []).forEach(f => rows.push({ relative_path: f.name, bucket: 'root', size: f.size, mtime: f.mtime }));
-  ['source', 'outer', 'result'].forEach(bucket => (tree[bucket] || []).forEach(f => rows.push({ ...f, bucket })));
+  ['source', 'outer', 'result', 'misc'].forEach(bucket => (tree[bucket] || []).forEach(f => rows.push({ ...f, bucket })));
   rows.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
 
   const legend = `<div class="legend">
     <span><span class="sw" style="background:var(--c-source)"></span>source</span>
     <span><span class="sw" style="background:var(--c-outer)"></span>outer</span>
     <span><span class="sw" style="background:var(--c-result)"></span>result</span>
+    <span><span class="sw" style="background:var(--c-misc)"></span>вне бакетов</span>
   </div>`;
 
   document.getElementById('pane-files').innerHTML = legend + rows.map(r => {
@@ -400,13 +428,29 @@ function buildFolderTree(entries, bucket) {
   return root;
 }
 
+function buildMiscTree(entries) {
+  const root = { folders: {}, files: [], path: 'misc' };
+  for (const entry of entries) {
+    const parts = entry.relative_path.split('/');
+    let node = root, accPath = 'misc';
+    for (let i = 0; i < parts.length - 1; i++) {
+      accPath += '/' + parts[i];
+      if (!node.folders[parts[i]]) node.folders[parts[i]] = { folders: {}, files: [], path: accPath };
+      node = node.folders[parts[i]];
+    }
+    node.files.push({ name: parts[parts.length - 1], entry });
+  }
+  return root;
+}
+
 function renderFolderNode(node, bucketClass, depth) {
   let html = '';
+  const canCreate = bucketClass !== 'misc';
   Object.keys(node.folders).sort().forEach(name => {
     const child = node.folders[name];
     html += `<div class="node folder-${bucketClass}" style="padding-left:${depth * 14}px">
       <span class="ic">📁</span><span class="name">${escapeHtml(name)}</span>
-      <button class="new-folder-btn" data-parent="${escapeHtml(child.path)}" title="новая папка">＋</button>
+      ${canCreate ? `<button class="new-folder-btn" data-parent="${escapeHtml(child.path)}" title="новая папка">＋</button>` : ''}
     </div>`;
     html += renderFolderNode(child, bucketClass, depth + 1);
   });
@@ -429,11 +473,21 @@ function renderTree(tree) {
     html += renderFolderNode(buildFolderTree(tree[bucket] || [], bucket), bucket, 0);
   });
 
+  if ((tree.misc || []).length) {
+    // Файлы, которые модель положила мимо source/outer/result (см.
+    // Проблему 4, спек 2026-07-28) — показываем как есть, без попытки
+    // угадать, куда их "следовало" положить.
+    const truncNote = tree.misc_truncated ? ' <span style="opacity:.7">(показаны первые файлы, список обрезан)</span>' : '';
+    html += `<div class="glabel">🗂 остальное — вне source/outer/result${truncNote}</div>`;
+    html += renderFolderNode(buildMiscTree(tree.misc), 'misc', 0);
+  }
+
   document.getElementById('tree').innerHTML = html;
 
   document.querySelectorAll('.tree .node.file').forEach(n => {
     n.addEventListener('click', () => {
       const relpath = n.dataset.relpath;
+      if (n.classList.contains('folder-misc')) { downloadFile(relpath); return; }
       if (/\.(md|txt)$/i.test(relpath)) openEditor(relpath);
       else downloadFile(relpath);
     });
@@ -583,8 +637,9 @@ async function sendMessage() {
   document.getElementById('composeAttachments').innerHTML = '';
 
   messages.push({ role: 'user', content: fullText, timestamp: new Date().toISOString() });
-  const assistantIdx = messages.length;
+  let assistantIdx = messages.length;
   messages.push({ role: 'assistant', content: '', timestamp: new Date().toISOString() });
+  recoveryStatus = null;
   renderMessages();
   clearActivity();
 
@@ -599,10 +654,41 @@ async function sendMessage() {
       return;
     }
     let streamEndedCleanly = false;
+    let slotOpen = true;
+    function openFreshSlotIfClosed() {
+      if (!slotOpen) {
+        assistantIdx = messages.length;
+        messages.push({ role: 'assistant', content: '', timestamp: new Date().toISOString() });
+        renderMessages();
+        slotOpen = true;
+      }
+    }
     try {
       await readSSE(resp, (name, payload) => {
-        if (name === 'assistant.delta') { messages[assistantIdx].content += payload.delta || ''; renderMessages(); }
-        else if (name === 'assistant.completed' && payload.content) { messages[assistantIdx].content = payload.content; renderMessages(); }
+        if (name === 'message.started') {
+          // Один ход Hermes реально состоит из произвольного числа
+          // отдельных assistant-сообщений (один на каждый шаг
+          // tool-calling цикла) — по контракту это должно начинаться
+          // своим message.started на каждый шаг, но это не проверено на
+          // сырых SSE-данных (спека опирается только на историю). На
+          // случай, если message.started приходит реже, чем шагов, ниже
+          // есть независимая защита через slotOpen/assistant.completed.
+          openFreshSlotIfClosed();
+          appendActivity(name, payload);
+        }
+        else if (name === 'assistant.delta') {
+          // Защита от риска выше: если предыдущий шаг уже был закрыт
+          // assistant.completed, а нового message.started почему-то не
+          // было — всё равно открываем новый слот здесь, а не дозаписываем
+          // в уже показанный законченный пузырь.
+          openFreshSlotIfClosed();
+          messages[assistantIdx].content += payload.delta || ''; renderMessages();
+        }
+        else if (name === 'assistant.completed') {
+          if (payload.content) messages[assistantIdx].content = payload.content;
+          renderMessages();
+          slotOpen = false;
+        }
         else if (name === 'error') { messages[assistantIdx].content = `Ошибка: ${payload.message || 'неизвестная'}`; renderMessages(); }
         else if (name === 'done') { streamEndedCleanly = true; }
         else { appendActivity(name, payload); }
@@ -611,37 +697,49 @@ async function sendMessage() {
       streamEndedCleanly = false;
     }
     // Соединение иногда рвётся раньше, чем агент реально закончил ход (долгая
-    // тихая пауза — wormsoft.ru/докер — и не спас даже heartbeat, например у
-    // самого пользователя моргнула сеть). Бэкенд продолжает работать и допишет
-    // ответ в историю чата — переспрашиваем её, а не оставляем читателя перед
-    // пустым/повисшим пузырём до ручной перезагрузки страницы.
-    if (!streamEndedCleanly) await recoverAfterStreamDrop(assistantIdx);
+    // тихая пауза — wormsoft.ru/докер). Бэкенд продолжает работать и допишет
+    // ответ в историю чата — целиком перечитываем историю вместо того, чтобы
+    // гадать, сколько ещё сообщений придёт в этом ходе (см. Проблему 3 в
+    // спеке — позиционное отслеживание несовместимо с переменным числом
+    // сообщений за один ход).
+    if (!streamEndedCleanly) await recoverAfterStreamDrop();
     await refreshTreeAndFiles();
   } finally {
     sendBtn.disabled = false;
   }
 }
 
-async function recoverAfterStreamDrop(assistantIdx) {
-  if (!messages[assistantIdx].content) messages[assistantIdx].content = 'Соединение прервалось, жду ответ агента…';
+async function recoverAfterStreamDrop() {
+  recoveryStatus = 'Соединение прервалось, жду ответ агента…';
   renderMessages();
-  const expectedCount = assistantIdx + 1;
-  for (let attempt = 0; attempt < 60; attempt++) {
-    await new Promise(r => setTimeout(r, 5000));
+  // Наблюдался ход на 47 сообщений (~17 мин) с паузами между шагами до
+  // ~100с (vision разбирает картинки) — константы ниже взяты с запасом выше этого.
+  const POLL_INTERVAL_MS = 5000;
+  const STABLE_WINDOW_MS = 120000;
+  const MAX_WAIT_MS = 25 * 60 * 1000;
+  const maxAttempts = Math.ceil(MAX_WAIT_MS / POLL_INTERVAL_MS);
+  const startLength = messages.length;
+  let lastGrowthAt = Date.now();
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
     const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
+    if (histResp.status === 401) { location.href = 'login.html'; return; }
     if (!histResp.ok) continue;
     const histBody = await histResp.json();
     const fresh = histBody.data.filter(m => m.role === 'user' || m.role === 'assistant');
-    if (fresh.length >= expectedCount && fresh[assistantIdx]?.role === 'assistant' && fresh[assistantIdx]?.content) {
-      messages = fresh;
+    if (fresh.length > messages.length) lastGrowthAt = Date.now();
+    messages = fresh;
+    if (Date.now() - lastGrowthAt >= STABLE_WINDOW_MS) {
+      recoveryStatus = null;
       renderMessages();
       return;
     }
-  }
-  if (messages[assistantIdx].content === 'Соединение прервалось, жду ответ агента…') {
-    messages[assistantIdx].content = 'Не удалось дождаться ответа — обновите страницу позже, агент мог ещё не закончить.';
     renderMessages();
   }
+  recoveryStatus = messages.length > startLength
+    ? null
+    : 'Не удалось дождаться ответа — обновите страницу позже, агент мог ещё не закончить.';
+  renderMessages();
 }
 
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
