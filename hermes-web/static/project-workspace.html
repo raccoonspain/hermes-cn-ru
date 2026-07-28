@@ -260,7 +260,11 @@ function iconFor(name) {
 }
 
 function formatTime(ts) {
-  const d = new Date(ts);
+  // Hermes отдаёт timestamp сообщений как Unix-секунды (число) — JS Date
+  // ожидает миллисекунды, отсюда домножение. Клиентские метки (при
+  // оптимистичной вставке в sendMessage) и mtime файлов из workspace.py —
+  // уже ISO-строки, которые new Date() понимает как есть.
+  const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
   return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
