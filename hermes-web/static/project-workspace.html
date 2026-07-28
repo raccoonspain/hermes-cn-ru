@@ -702,11 +702,28 @@ async function sendMessage() {
     // гадать, сколько ещё сообщений придёт в этом ходе (см. Проблему 3 в
     // спеке — позиционное отслеживание несовместимо с переменным числом
     // сообщений за один ход).
-    if (!streamEndedCleanly) await recoverAfterStreamDrop();
+    if (streamEndedCleanly) await reconcileWithHistory();
+    else await recoverAfterStreamDrop();
     await refreshTreeAndFiles();
   } finally {
     sendBtn.disabled = false;
   }
+}
+
+async function reconcileWithHistory() {
+  // Живая приёмка 2026-07-28 показала: Hermes шлёт message.started/
+  // assistant.completed один раз на весь ход, а не на каждый шаг
+  // многошагового хода (перевод по фразам, 3 шага → 1 событие каждого
+  // типа) — многослотовый рендер по ходу потока (см. sendMessage) поэтому
+  // остаётся лишь приблизительным "черновиком". После штатного event:
+  // done бэкенд уже дописал всё в историю — всегда сверяем итог с
+  // реальными данными, не полагаясь на догадки по SSE-событиям.
+  const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
+  if (histResp.status === 401) { location.href = 'login.html'; return; }
+  if (!histResp.ok) return;
+  const histBody = await histResp.json();
+  messages = histBody.data.filter(m => m.role === 'user' || m.role === 'assistant');
+  renderMessages();
 }
 
 async function recoverAfterStreamDrop() {
