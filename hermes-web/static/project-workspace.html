@@ -283,6 +283,11 @@ function renderMessages() {
   el.innerHTML = messages.map((m, idx) => {
     if (m.role !== 'user' && m.role !== 'assistant') return '';
     const { text, attachments } = splitAttachments(m.content);
+    // Hermes хранит каждый шаг tool-calling цикла отдельным assistant-
+    // сообщением — часть из них легитимно пустые (модель молча вызвала
+    // инструмент, ничего не написав). Рендерить такие как пустую тёмную
+    // капсулу нечего — пропускаем узел целиком, не трогая индексацию.
+    if (m.role === 'assistant' && !text.trim() && attachments.length === 0) return '';
     const attachRow = attachments.length
       ? `<div class="attach-row">${attachments.map(a => `<div class="attach-chip" data-download="${escapeHtml(a)}"><span class="sw ${bucketOf(a)}"></span>${escapeHtml(a.split('/').pop())}</div>`).join('')}</div>`
       : '';
