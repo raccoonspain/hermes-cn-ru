@@ -652,30 +652,23 @@ async function recoverAfterStreamDrop() {
   const lastIdx = messages.length - 1;
   if (!messages[lastIdx].content) messages[lastIdx].content = 'Соединение прервалось, жду ответ агента…';
   renderMessages();
-  // Сообщений за один ход может быть непредсказуемо много (см. Проблему 3 —
-  // до 47 в реальном случае), опрашиваем историю, пока её длина не
-  // перестанет расти между двумя опросами подряд — это надёжный сигнал,
-  // что ход действительно завершился, без гадания о точном числе шагов.
-  let previousLength = -1;
-  for (let attempt = 0; attempt < 60; attempt++) {
-    await new Promise(r => setTimeout(r, 5000));
+  // Наблюдался ход на 47 сообщений (~17 мин) с паузами между шагами до
+  // ~100с (vision разбирает картинки) — константы ниже взяты с запасом выше этого.
+  const POLL_INTERVAL_MS = 5000;
+  const STABLE_WINDOW_MS = 120000;
+  const MAX_WAIT_MS = 25 * 60 * 1000;
+  const maxAttempts = Math.ceil(MAX_WAIT_MS / POLL_INTERVAL_MS);
+  let lastGrowthAt = Date.now();
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
     const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
     if (!histResp.ok) continue;
     const histBody = await histResp.json();
     const fresh = histBody.data.filter(m => m.role === 'user' || m.role === 'assistant');
-    if (fresh.length > messages.length) {
-      messages = fresh;
-      renderMessages();
-      previousLength = -1;
-      continue;
-    }
-    if (fresh.length === messages.length && fresh.length === previousLength) {
-      messages = fresh;
-      renderMessages();
-      return;
-    }
-    previousLength = fresh.length;
+    if (fresh.length > messages.length) lastGrowthAt = Date.now();
     messages = fresh;
+    renderMessages();
+    if (Date.now() - lastGrowthAt >= STABLE_WINDOW_MS) return;
   }
   const stillPlaceholder = messages[lastIdx] && messages[lastIdx].content === 'Соединение прервалось, жду ответ агента…';
   if (stillPlaceholder) {
