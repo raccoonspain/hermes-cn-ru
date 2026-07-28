@@ -20,6 +20,11 @@ COOKIE_NAME = "hermes_web_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 дней
 RATE_LIMIT_MAX_ATTEMPTS = 5
 RATE_LIMIT_WINDOW_SECONDS = 300
+# SSE-заглушка (": ping\n\n" — RFC-комментарий, клиент его игнорирует, см.
+# app.js readSSE) во время тихих пауз агента (докер, ожидание wormsoft.ru) —
+# без неё простаивающее соединение рвёт прокси/браузер раньше, чем агент
+# реально закончит (инцидент 2026-07-28: ответ пришёл, клиент уже отвалился).
+HEARTBEAT_INTERVAL = 15.0
 
 
 def _require_user(request: web.Request) -> dict:
@@ -127,9 +132,25 @@ async def handle_send_message(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
     try:
-        async for name, payload in quickchat.send_message(
+        agen = quickchat.send_message(
             request.app["db"], request.app["http_session"], request.app["quickchat_config"], chat_session_id, text,
-        ):
+        ).__aiter__()
+        # asyncio.wait(timeout=...) над одной и той же pending-задачей, а не
+        # asyncio.wait_for — таймаут не должен отменять agen.__anext__(): async
+        # generator плохо переживает CancelledError в момент, когда сам ждёт
+        # сетевого ответа от Hermes API, и это оборвало бы реальный запрос
+        # ради заглушки. При таймауте просто шлём ping и ждём ту же задачу снова.
+        pending = asyncio.ensure_future(agen.__anext__())
+        while True:
+            done, _ = await asyncio.wait({pending}, timeout=HEARTBEAT_INTERVAL)
+            if not done:
+                await response.write(b": ping\n\n")
+                continue
+            try:
+                name, payload = pending.result()
+            except StopAsyncIteration:
+                break
+            pending = asyncio.ensure_future(agen.__anext__())
             data = json.dumps(payload, ensure_ascii=False)
             await response.write(f"event: {name}\ndata: {data}\n\n".encode("utf-8"))
     except (quickchat.QuickChatError, hermes_client.HermesClientError, aiohttp.ClientError, asyncio.TimeoutError) as exc:

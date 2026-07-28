@@ -90,17 +90,45 @@ async function send() {
       assistantEl.textContent = 'Hermes временно недоступен, попробуйте ещё раз';
       return;
     }
+    let streamEndedCleanly = false;
     await readSSE(resp, (name, payload) => {
       if (name === 'assistant.delta') assistantEl.textContent += payload.delta || '';
       else if (name === 'assistant.completed' && payload.content) assistantEl.textContent = payload.content;
       else if (name === 'error') assistantEl.textContent = `Ошибка: ${payload.message || 'неизвестная'}`;
-      // остальные события (tool.*, done, ...) на этом минимальном экране не отображаются
+      else if (name === 'done') streamEndedCleanly = true;
+      // остальные события (tool.*, ...) на этом минимальном экране не отображаются
       threadEl.scrollTop = threadEl.scrollHeight;
     });
+    if (!streamEndedCleanly) await recoverAfterStreamDrop(assistantEl);
   } catch (err) {
-    assistantEl.textContent = 'Hermes временно недоступен, попробуйте ещё раз';
+    await recoverAfterStreamDrop(assistantEl);
   } finally {
     sendBtn.disabled = false;
+  }
+}
+
+// Соединение SSE иногда рвётся раньше, чем агент реально закончил ход (долгая
+// тихая пауза — wormsoft.ru/докер — переживает даже heartbeat, например у
+// самого пользователя моргнула сеть). Бэкенд продолжает работать и допишет
+// ответ в историю чата — переспрашиваем её вместо пустого/повисшего пузыря.
+async function recoverAfterStreamDrop(assistantEl) {
+  if (!assistantEl.textContent) assistantEl.textContent = 'Соединение прервалось, жду ответ агента…';
+  const before = assistantEl.textContent;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
+    if (!histResp.ok) continue;
+    const histBody = await histResp.json();
+    const assistantMsgs = histBody.data.filter(m => m.role === 'assistant');
+    const last = assistantMsgs[assistantMsgs.length - 1];
+    if (last && last.content && last.content !== before) {
+      assistantEl.textContent = last.content;
+      threadEl.scrollTop = threadEl.scrollHeight;
+      return;
+    }
+  }
+  if (assistantEl.textContent === 'Соединение прервалось, жду ответ агента…') {
+    assistantEl.textContent = 'Не удалось дождаться ответа — обновите страницу позже, агент мог ещё не закончить.';
   }
 }
 

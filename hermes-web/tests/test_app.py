@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import aiohttp
@@ -116,6 +117,49 @@ async def test_send_message_streams_sse_events(aiohttp_client, app_and_conn, mon
     body = (await resp.read()).decode("utf-8")
     assert 'event: assistant.delta\ndata: {"delta": "ok"}' in body
     assert "event: done" in body
+
+
+@pytest.mark.asyncio
+async def test_send_message_emits_heartbeat_during_silent_gap(aiohttp_client, app_and_conn, monkeypatch):
+    # Держим SSE-соединение живым во время долгих тихих пауз агента (ждёт
+    # ответа wormsoft.ru, гоняет докер) — иначе прокси/браузер обрывают
+    # простаивающее соединение раньше, чем агент реально закончит (см.
+    # инцидент 2026-07-28: ответ пришёл, но клиент уже отвалился и не
+    # переспросил историю).
+    monkeypatch.setattr("hermes_web.app.HEARTBEAT_INTERVAL", 0.05)
+
+    async def fake_send_message(db_conn, http_session, config, chat_session_id, text):
+        await asyncio.sleep(0.3)
+        yield "assistant.delta", {"delta": "ok"}
+        yield "done", {}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.send_message", fake_send_message)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/chat/chat1/send", json={"text": "привет"})
+    assert resp.status == 200
+    body = (await resp.read()).decode("utf-8")
+    assert body.count(": ping\n\n") >= 3
+    ping_pos = body.index(": ping")
+    delta_pos = body.index("event: assistant.delta")
+    assert ping_pos < delta_pos
+    assert "event: done" in body
+
+
+@pytest.mark.asyncio
+async def test_send_message_no_heartbeat_noise_when_events_arrive_promptly(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_send_message(db_conn, http_session, config, chat_session_id, text):
+        yield "assistant.delta", {"delta": "ok"}
+        yield "done", {}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.send_message", fake_send_message)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/chat/chat1/send", json={"text": "привет"})
+    body = (await resp.read()).decode("utf-8")
+    assert ": ping" not in body
 
 
 @pytest.mark.asyncio

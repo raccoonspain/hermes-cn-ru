@@ -153,6 +153,18 @@ async def test_send_message_forwards_project_path_as_system_message(tmp_path, mo
     assert row["last_message_at"] is not None
 
 
+def test_system_message_warns_against_absolute_workspace_paths():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/2026-07-26_x")
+    assert "write_file" in msg or "read_file" in msg
+    assert "/workspace/" in msg
+    assert "относительн" in msg.lower()
+
+
+def test_system_message_points_deliverables_to_result_bucket():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/2026-07-26_x")
+    assert "result/" in msg
+
+
 @pytest.mark.asyncio
 async def test_send_message_unknown_chat_session_raises(tmp_path):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))

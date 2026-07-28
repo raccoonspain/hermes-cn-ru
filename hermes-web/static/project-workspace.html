@@ -591,13 +591,47 @@ async function sendMessage() {
     renderMessages();
     return;
   }
-  await readSSE(resp, (name, payload) => {
-    if (name === 'assistant.delta') { messages[assistantIdx].content += payload.delta || ''; renderMessages(); }
-    else if (name === 'assistant.completed' && payload.content) { messages[assistantIdx].content = payload.content; renderMessages(); }
-    else if (name === 'error') { messages[assistantIdx].content = `Ошибка: ${payload.message || 'неизвестная'}`; renderMessages(); }
-    else if (name !== 'done') { appendActivity(name, payload); }
-  });
+  let streamEndedCleanly = false;
+  try {
+    await readSSE(resp, (name, payload) => {
+      if (name === 'assistant.delta') { messages[assistantIdx].content += payload.delta || ''; renderMessages(); }
+      else if (name === 'assistant.completed' && payload.content) { messages[assistantIdx].content = payload.content; renderMessages(); }
+      else if (name === 'error') { messages[assistantIdx].content = `Ошибка: ${payload.message || 'неизвестная'}`; renderMessages(); }
+      else if (name === 'done') { streamEndedCleanly = true; }
+      else { appendActivity(name, payload); }
+    });
+  } catch (err) {
+    streamEndedCleanly = false;
+  }
+  // Соединение иногда рвётся раньше, чем агент реально закончил ход (долгая
+  // тихая пауза — wormsoft.ru/докер — и не спас даже heartbeat, например у
+  // самого пользователя моргнула сеть). Бэкенд продолжает работать и допишет
+  // ответ в историю чата — переспрашиваем её, а не оставляем читателя перед
+  // пустым/повисшим пузырём до ручной перезагрузки страницы.
+  if (!streamEndedCleanly) await recoverAfterStreamDrop(assistantIdx);
   await refreshTreeAndFiles();
+}
+
+async function recoverAfterStreamDrop(assistantIdx) {
+  if (!messages[assistantIdx].content) messages[assistantIdx].content = 'Соединение прервалось, жду ответ агента…';
+  renderMessages();
+  const expectedCount = assistantIdx + 1;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
+    if (!histResp.ok) continue;
+    const histBody = await histResp.json();
+    const fresh = histBody.data.filter(m => m.role === 'user' || m.role === 'assistant');
+    if (fresh.length >= expectedCount && fresh[assistantIdx]?.role === 'assistant' && fresh[assistantIdx]?.content) {
+      messages = fresh;
+      renderMessages();
+      return;
+    }
+  }
+  if (messages[assistantIdx].content === 'Соединение прервалось, жду ответ агента…') {
+    messages[assistantIdx].content = 'Не удалось дождаться ответа — обновите страницу позже, агент мог ещё не закончить.';
+    renderMessages();
+  }
 }
 
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
