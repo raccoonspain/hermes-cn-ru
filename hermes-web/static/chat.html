@@ -77,6 +77,11 @@ async function send() {
   textInput.value = '';
   sendBtn.disabled = true;
   appendMessage('user', text);
+  // Считаем, сколько ответов ассистента уже было ДО этого хода — при
+  // восстановлении после обрыва ищем в истории ответ именно на этом месте,
+  // а не последний по времени (иначе можно подставить ответ на предыдущий
+  // вопрос, если пользователь успел отправить два сообщения подряд).
+  const priorAssistantCount = threadEl.querySelectorAll('.msg.assistant').length;
   const assistantEl = appendMessage('assistant', '');
 
   try {
@@ -99,9 +104,9 @@ async function send() {
       // остальные события (tool.*, ...) на этом минимальном экране не отображаются
       threadEl.scrollTop = threadEl.scrollHeight;
     });
-    if (!streamEndedCleanly) await recoverAfterStreamDrop(assistantEl);
+    if (!streamEndedCleanly) await recoverAfterStreamDrop(assistantEl, priorAssistantCount);
   } catch (err) {
-    await recoverAfterStreamDrop(assistantEl);
+    await recoverAfterStreamDrop(assistantEl, priorAssistantCount);
   } finally {
     sendBtn.disabled = false;
   }
@@ -111,23 +116,23 @@ async function send() {
 // тихая пауза — wormsoft.ru/докер — переживает даже heartbeat, например у
 // самого пользователя моргнула сеть). Бэкенд продолжает работать и допишет
 // ответ в историю чата — переспрашиваем её вместо пустого/повисшего пузыря.
-async function recoverAfterStreamDrop(assistantEl) {
-  if (!assistantEl.textContent) assistantEl.textContent = 'Соединение прервалось, жду ответ агента…';
-  const before = assistantEl.textContent;
+async function recoverAfterStreamDrop(assistantEl, priorAssistantCount) {
+  const hadContent = !!assistantEl.textContent;
+  if (!hadContent) assistantEl.textContent = 'Соединение прервалось, жду ответ агента…';
   for (let attempt = 0; attempt < 60; attempt++) {
     await new Promise(r => setTimeout(r, 5000));
     const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
     if (!histResp.ok) continue;
     const histBody = await histResp.json();
     const assistantMsgs = histBody.data.filter(m => m.role === 'assistant');
-    const last = assistantMsgs[assistantMsgs.length - 1];
-    if (last && last.content && last.content !== before) {
-      assistantEl.textContent = last.content;
+    const target = assistantMsgs[priorAssistantCount];
+    if (target && target.content) {
+      assistantEl.textContent = target.content;
       threadEl.scrollTop = threadEl.scrollHeight;
       return;
     }
   }
-  if (assistantEl.textContent === 'Соединение прервалось, жду ответ агента…') {
+  if (!hadContent) {
     assistantEl.textContent = 'Не удалось дождаться ответа — обновите страницу позже, агент мог ещё не закончить.';
   }
 }

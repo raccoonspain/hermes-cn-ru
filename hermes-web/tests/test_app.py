@@ -3,6 +3,7 @@ import json
 
 import aiohttp
 import pytest
+from aiohttp import web
 
 from hermes_web import auth, hermes_client, projects, quickchat, storage
 from hermes_web.app import create_app
@@ -145,6 +146,47 @@ async def test_send_message_emits_heartbeat_during_silent_gap(aiohttp_client, ap
     delta_pos = body.index("event: assistant.delta")
     assert ping_pos < delta_pos
     assert "event: done" in body
+
+
+@pytest.mark.asyncio
+async def test_send_message_stops_advancing_generator_after_write_failure(aiohttp_client, app_and_conn, monkeypatch):
+    # Регрессия: раньше следующий agen.__anext__() планировался ДО записи
+    # текущего payload — если клиент уже отвалился (write бросает), уже
+    # запущенная фоновая задача всё равно доводила генератор (и реальный
+    # запрос к Hermes внутри него) до следующего yield, никем не дожидаемая.
+    advanced = []
+
+    async def fake_send_message(db_conn, http_session, config, chat_session_id, text):
+        advanced.append("a")
+        yield "assistant.delta", {"delta": "one"}
+        advanced.append("b")
+        yield "assistant.delta", {"delta": "two"}
+        advanced.append("c")
+        yield "done", {}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.send_message", fake_send_message)
+
+    original_write = web.StreamResponse.write
+    calls = {"n": 0}
+
+    async def flaky_write(self, data):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionResetError("simulated client disconnect on first write")
+        return await original_write(self, data)
+
+    monkeypatch.setattr(web.StreamResponse, "write", flaky_write)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    try:
+        await client.post("/api/chat/chat1/send", json={"text": "привет"})
+    except Exception:
+        pass  # обрыв записи на сервере может выглядеть с этой стороны по-разному — важен только advanced ниже
+
+    # Дать шанс возможной утечённой фоновой задаче продвинуть генератор дальше.
+    await asyncio.sleep(0.05)
+    assert advanced == ["a"]
 
 
 @pytest.mark.asyncio

@@ -567,8 +567,14 @@ async function uploadPending(files, targetDir) {
 
 async function sendMessage() {
   const input = document.getElementById('composeInput');
+  const sendBtn = document.getElementById('sendBtn');
   const text = input.value.trim();
   if (!text && pendingAttachments.length === 0) return;
+  // Пока идёт ход — не даём отправить второй: recoverAfterStreamDrop при
+  // восстановлении после обрыва целиком переприсваивает общий массив
+  // messages, что гонится с параллельным readSSE-коллбэком второго хода.
+  if (sendBtn.disabled) return;
+  sendBtn.disabled = true;
   input.value = '';
 
   let fullText = text;
@@ -582,34 +588,38 @@ async function sendMessage() {
   renderMessages();
   clearActivity();
 
-  const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/send`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: fullText }),
-  });
-  if (resp.status === 401) { location.href = 'login.html'; return; }
-  if (!resp.ok) {
-    messages[assistantIdx].content = 'Hermes временно недоступен, попробуйте ещё раз';
-    renderMessages();
-    return;
-  }
-  let streamEndedCleanly = false;
   try {
-    await readSSE(resp, (name, payload) => {
-      if (name === 'assistant.delta') { messages[assistantIdx].content += payload.delta || ''; renderMessages(); }
-      else if (name === 'assistant.completed' && payload.content) { messages[assistantIdx].content = payload.content; renderMessages(); }
-      else if (name === 'error') { messages[assistantIdx].content = `Ошибка: ${payload.message || 'неизвестная'}`; renderMessages(); }
-      else if (name === 'done') { streamEndedCleanly = true; }
-      else { appendActivity(name, payload); }
+    const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: fullText }),
     });
-  } catch (err) {
-    streamEndedCleanly = false;
+    if (resp.status === 401) { location.href = 'login.html'; return; }
+    if (!resp.ok) {
+      messages[assistantIdx].content = 'Hermes временно недоступен, попробуйте ещё раз';
+      renderMessages();
+      return;
+    }
+    let streamEndedCleanly = false;
+    try {
+      await readSSE(resp, (name, payload) => {
+        if (name === 'assistant.delta') { messages[assistantIdx].content += payload.delta || ''; renderMessages(); }
+        else if (name === 'assistant.completed' && payload.content) { messages[assistantIdx].content = payload.content; renderMessages(); }
+        else if (name === 'error') { messages[assistantIdx].content = `Ошибка: ${payload.message || 'неизвестная'}`; renderMessages(); }
+        else if (name === 'done') { streamEndedCleanly = true; }
+        else { appendActivity(name, payload); }
+      });
+    } catch (err) {
+      streamEndedCleanly = false;
+    }
+    // Соединение иногда рвётся раньше, чем агент реально закончил ход (долгая
+    // тихая пауза — wormsoft.ru/докер — и не спас даже heartbeat, например у
+    // самого пользователя моргнула сеть). Бэкенд продолжает работать и допишет
+    // ответ в историю чата — переспрашиваем её, а не оставляем читателя перед
+    // пустым/повисшим пузырём до ручной перезагрузки страницы.
+    if (!streamEndedCleanly) await recoverAfterStreamDrop(assistantIdx);
+    await refreshTreeAndFiles();
+  } finally {
+    sendBtn.disabled = false;
   }
-  // Соединение иногда рвётся раньше, чем агент реально закончил ход (долгая
-  // тихая пауза — wormsoft.ru/докер — и не спас даже heartbeat, например у
-  // самого пользователя моргнула сеть). Бэкенд продолжает работать и допишет
-  // ответ в историю чата — переспрашиваем её, а не оставляем читателя перед
-  // пустым/повисшим пузырём до ручной перезагрузки страницы.
-  if (!streamEndedCleanly) await recoverAfterStreamDrop(assistantIdx);
-  await refreshTreeAndFiles();
 }
 
 async function recoverAfterStreamDrop(assistantIdx) {

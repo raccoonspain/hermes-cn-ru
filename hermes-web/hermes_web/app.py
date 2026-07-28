@@ -141,18 +141,31 @@ async def handle_send_message(request: web.Request) -> web.StreamResponse:
         # сетевого ответа от Hermes API, и это оборвало бы реальный запрос
         # ради заглушки. При таймауте просто шлём ping и ждём ту же задачу снова.
         pending = asyncio.ensure_future(agen.__anext__())
-        while True:
-            done, _ = await asyncio.wait({pending}, timeout=HEARTBEAT_INTERVAL)
-            if not done:
-                await response.write(b": ping\n\n")
-                continue
-            try:
-                name, payload = pending.result()
-            except StopAsyncIteration:
-                break
-            pending = asyncio.ensure_future(agen.__anext__())
-            data = json.dumps(payload, ensure_ascii=False)
-            await response.write(f"event: {name}\ndata: {data}\n\n".encode("utf-8"))
+        try:
+            while True:
+                done, _ = await asyncio.wait({pending}, timeout=HEARTBEAT_INTERVAL)
+                if not done:
+                    await response.write(b": ping\n\n")
+                    continue
+                try:
+                    name, payload = pending.result()
+                except StopAsyncIteration:
+                    break
+                data = json.dumps(payload, ensure_ascii=False)
+                await response.write(f"event: {name}\ndata: {data}\n\n".encode("utf-8"))
+                # Следующий __anext__() планируем ТОЛЬКО после успешной записи
+                # текущего payload. Если планировать его раньше и запись упадёт
+                # (клиент уже отвалился), уже стартовавшая фоновая задача всё
+                # равно доведёт генератор (и реальный запрос к Hermes внутри
+                # него) до следующего yield — никем не дожидаемая утечка.
+                pending = asyncio.ensure_future(agen.__anext__())
+        finally:
+            if not pending.done():
+                pending.cancel()
+                try:
+                    await pending
+                except BaseException:
+                    pass
     except (quickchat.QuickChatError, hermes_client.HermesClientError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
         # response.prepare() выше уже отправил 200 text/event-stream — на этом
         # этапе упасть с необработанным исключением нельзя: клиент останется
