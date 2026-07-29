@@ -95,6 +95,29 @@ def test_list_tree_lists_nested_folders(tmp_path):
     assert tree["source"][0]["size"] == len(b"pdf-bytes")
 
 
+def test_list_tree_includes_empty_subfolder_created_via_make_dir(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    workspace.make_dir("dem", "dem/ALL/a", "result", "kirik", config)
+
+    tree = workspace.list_tree("dem", "dem/ALL/a", config)
+    assert tree["result"] == []
+    assert tree["result_dirs"] == ["result/kirik"]
+    assert tree["source_dirs"] == []
+    assert tree["outer_dirs"] == []
+
+
+def test_list_tree_dirs_includes_intermediate_folder_without_own_files(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    nested = project_dir / "result" / "kirik" / "3-23-29"
+    nested.mkdir(parents=True)
+    (nested / "solution.md").write_text("x", encoding="utf-8")
+
+    tree = workspace.list_tree("dem", "dem/ALL/a", config)
+    assert tree["result_dirs"] == ["result/kirik", "result/kirik/3-23-29"]
+
+
 def test_list_tree_rejects_foreign_project(tmp_path):
     config = _config(tmp_path)
     _write_project(tmp_path, config, "dem/ALL/a")

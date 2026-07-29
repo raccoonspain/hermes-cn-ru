@@ -172,8 +172,11 @@ def list_tree(user: str, project_path: str, config) -> dict:
     for bucket in BUCKETS:
         bucket_dir = os.path.join(project_root, bucket)
         entries = []
+        dirs = []
         if os.path.isdir(bucket_dir):
             for dirpath, _dirnames, filenames in os.walk(bucket_dir):
+                if dirpath != bucket_dir:
+                    dirs.append(os.path.relpath(dirpath, project_root))
                 for filename in filenames:
                     full = os.path.join(dirpath, filename)
                     entries.append({
@@ -182,6 +185,7 @@ def list_tree(user: str, project_path: str, config) -> dict:
                         "mtime": _iso_mtime(full),
                     })
         tree[bucket] = sorted(entries, key=lambda e: e["relative_path"])
+        tree[f"{bucket}_dirs"] = sorted(dirs)
     misc_entries, misc_truncated = _list_misc(project_root)
     tree["misc"] = misc_entries
     tree["misc_truncated"] = misc_truncated
