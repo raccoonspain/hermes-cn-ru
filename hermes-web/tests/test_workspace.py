@@ -494,3 +494,132 @@ def test_list_tree_misc_truncates_when_over_limit(tmp_path, monkeypatch):
     tree = workspace.list_tree("dem", "dem/ALL/a", config)
     assert len(tree["misc"]) == 3
     assert tree["misc_truncated"] is True
+
+
+def test_move_entry_moves_file_between_buckets(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    result = workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", "result", None, config)
+
+    assert result["relative_path"] == "result/note.txt"
+    assert (project_dir / "result" / "note.txt").read_text(encoding="utf-8") == "текст"
+    assert not (project_dir / "source" / "note.txt").exists()
+
+
+def test_move_entry_renames_file(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    result = workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", "source", "renamed.txt", config)
+
+    assert result["relative_path"] == "source/renamed.txt"
+    assert (project_dir / "source" / "renamed.txt").exists()
+    assert not (project_dir / "source" / "note.txt").exists()
+
+
+def test_move_entry_moves_folder_with_contents(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    nested = project_dir / "outer" / "topic"
+    nested.mkdir(parents=True)
+    (nested / "a.txt").write_text("a", encoding="utf-8")
+
+    result = workspace.move_entry("dem", "dem/ALL/a", "outer/topic", "result", None, config)
+
+    assert result["relative_path"] == "result/topic"
+    assert (project_dir / "result" / "topic" / "a.txt").read_text(encoding="utf-8") == "a"
+    assert not (project_dir / "outer" / "topic").exists()
+
+
+def test_move_entry_allows_source_outside_buckets(tmp_path):
+    """A2 обобщён: работает и для файлов из misc (вне source/outer/result), не только для них в result/."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "loose.html").write_text("<html></html>", encoding="utf-8")
+
+    result = workspace.move_entry("dem", "dem/ALL/a", "loose.html", "result", None, config)
+
+    assert result["relative_path"] == "result/loose.html"
+    assert (project_dir / "result" / "loose.html").exists()
+    assert not (project_dir / "loose.html").exists()
+
+
+def test_move_entry_allows_dest_outside_buckets(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    result = workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", ".", None, config)
+
+    assert result["relative_path"] == "note.txt"
+    assert (project_dir / "note.txt").exists()
+
+
+def test_move_entry_rejects_missing_source(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.move_entry("dem", "dem/ALL/a", "source/nope.txt", "result", None, config)
+
+
+def test_move_entry_rejects_traversal_in_source(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.move_entry("dem", "dem/ALL/a", "../../etc/passwd", "result", None, config)
+
+
+def test_move_entry_rejects_traversal_in_dest_dir(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", "../../../etc", None, config)
+
+
+def test_move_entry_collision_raises(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("1", encoding="utf-8")
+    (project_dir / "result").mkdir()
+    (project_dir / "result" / "note.txt").write_text("2", encoding="utf-8")
+
+    with pytest.raises(workspace.WorkspaceCollisionError):
+        workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", "result", None, config)
+
+
+def test_move_entry_rejects_bucket_dir_itself(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.move_entry("dem", "dem/ALL/a", "source", "result", None, config)
+
+
+def test_move_entry_rejects_about_md(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.move_entry("dem", "dem/ALL/a", "about.md", "result", None, config)
+
+
+def test_move_entry_ensures_ownership_before_write(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    calls = []
+    monkeypatch.setattr(workspace.permissions, "ensure_ownership_sync", lambda root: calls.append(root))
+
+    workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", "result", None, config)
+
+    assert calls == [str(project_dir)]

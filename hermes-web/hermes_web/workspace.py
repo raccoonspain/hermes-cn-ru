@@ -281,3 +281,35 @@ def save_upload(user: str, project_path: str, target_dir: str, filename: str, co
         fh.write(content)
 
     return {"relative_path": os.path.relpath(target, project_root), "size": len(content)}
+
+
+def move_entry(user: str, project_path: str, source: str, dest_dir: str, new_name: str | None, config) -> dict:
+    project_root, source_candidate = resolve_file_path(user, project_path, source, config)
+    permissions.ensure_ownership_sync(project_root)
+
+    if not os.path.exists(source_candidate):
+        raise WorkspaceError(f"'{source}' не найден")
+    if source_candidate == project_root or source in ROOT_EDITABLE_FILES:
+        raise WorkspaceError(f"'{source}' нельзя перемещать")
+    for bucket in BUCKETS:
+        if source_candidate == os.path.join(project_root, bucket):
+            raise WorkspaceError(f"'{source}' нельзя перемещать — это сам bucket '{bucket}'")
+
+    name = new_name if new_name else os.path.basename(source_candidate)
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        raise WorkspaceError(f"недопустимое имя: '{name}'")
+
+    _, dest_dir_candidate = resolve_file_path(user, project_path, dest_dir, config)
+    target = os.path.realpath(os.path.join(dest_dir_candidate, name))
+    if target != dest_dir_candidate and not target.startswith(dest_dir_candidate + os.sep):
+        raise WorkspaceError(f"недопустимое имя: '{name}'")
+    if os.path.exists(target):
+        raise WorkspaceCollisionError(f"'{name}' уже существует в целевой папке")
+
+    os.makedirs(dest_dir_candidate, exist_ok=True)
+    try:
+        os.rename(source_candidate, target)
+    except OSError as exc:
+        raise WorkspaceError(f"не удалось переместить '{source}': {exc}") from exc
+
+    return {"relative_path": os.path.relpath(target, project_root)}
