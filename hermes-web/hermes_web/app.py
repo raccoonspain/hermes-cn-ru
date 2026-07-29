@@ -118,6 +118,8 @@ async def handle_send_message(request: web.Request) -> web.StreamResponse:
     if not text:
         return web.json_response({"error": "text is required"}, status=400)
 
+    result_target = body.get("result_target")
+
     # Только блокируем доступ к чужой существующей сессии. Если сессии с
     # таким id вообще нет — это обрабатывает quickchat.send_message ниже
     # (кидает QuickChatError, который ловится в try/except и уходит SSE-
@@ -132,8 +134,10 @@ async def handle_send_message(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
     try:
+        send_kwargs = {"result_target": result_target} if result_target is not None else {}
         agen = quickchat.send_message(
             request.app["db"], request.app["http_session"], request.app["quickchat_config"], chat_session_id, text,
+            **send_kwargs,
         ).__aiter__()
         # asyncio.wait(timeout=...) над одной и той же pending-задачей, а не
         # asyncio.wait_for — таймаут не должен отменять agen.__anext__(): async

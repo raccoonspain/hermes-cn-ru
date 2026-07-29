@@ -121,6 +121,40 @@ async def test_send_message_streams_sse_events(aiohttp_client, app_and_conn, mon
 
 
 @pytest.mark.asyncio
+async def test_send_message_forwards_result_target(aiohttp_client, app_and_conn, monkeypatch):
+    captured = {}
+
+    async def fake_send_message(db_conn, http_session, config, chat_session_id, text, result_target=None):
+        captured["result_target"] = result_target
+        yield "done", {}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.send_message", fake_send_message)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/chat/chat1/send", json={"text": "привет", "result_target": "result/kirik"})
+    assert resp.status == 200
+    await resp.read()
+    assert captured["result_target"] == "result/kirik"
+
+
+@pytest.mark.asyncio
+async def test_send_message_omits_result_target_when_absent(aiohttp_client, app_and_conn, monkeypatch):
+    # Существующие клиенты (и большинство текущих тестов этого файла) не
+    # шлют result_target вовсе — fake_send_message без этого параметра
+    # должен продолжать работать без TypeError по неожиданному kwarg.
+    async def fake_send_message(db_conn, http_session, config, chat_session_id, text):
+        yield "done", {}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.send_message", fake_send_message)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/chat/chat1/send", json={"text": "привет"})
+    assert resp.status == 200
+
+
+@pytest.mark.asyncio
 async def test_send_message_emits_heartbeat_during_silent_gap(aiohttp_client, app_and_conn, monkeypatch):
     # Держим SSE-соединение живым во время долгих тихих пауз агента (ждёт
     # ответа wormsoft.ru, гоняет докер) — иначе прокси/браузер обрывают
