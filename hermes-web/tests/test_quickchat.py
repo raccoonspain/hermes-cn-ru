@@ -155,6 +155,34 @@ async def test_send_message_forwards_project_path_as_system_message(tmp_path, mo
     assert row["last_message_at"] is not None
 
 
+@pytest.mark.asyncio
+async def test_send_message_ensures_ownership_before_dispatch(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    host_project_path = str(tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_x")
+    storage.create_chat_session(conn, "chat1", "dem", host_project_path, "web_x", created_at=1.0)
+
+    calls = []
+
+    async def fake_ensure_ownership(project_root):
+        calls.append(project_root)
+
+    monkeypatch.setattr(quickchat.permissions, "ensure_ownership", fake_ensure_ownership)
+
+    async def fake_stream_chat(http_session, base_url, api_key, hermes_session_id, message, system_message=None):
+        # На момент вызова стриминга самопочинка уже должна была отработать.
+        assert calls == [host_project_path]
+        yield "done", {}
+
+    monkeypatch.setattr(quickchat.hermes_client, "stream_chat", fake_stream_chat)
+
+    events = []
+    async for name, payload in quickchat.send_message(conn, http_session=None, config=config, chat_session_id="chat1", text="привет"):
+        events.append((name, payload))
+
+    assert calls == [host_project_path]
+
+
 def test_sandbox_project_path_replaces_workspace_root_with_container_mount(tmp_path):
     config = _config(tmp_path)
     host_path = str(tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_x")
