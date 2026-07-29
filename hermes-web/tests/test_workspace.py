@@ -229,6 +229,44 @@ async def test_save_about_md_reindex_runs_off_event_loop(tmp_path, monkeypatch):
     assert seen["thread"] is not threading.main_thread()
 
 
+@pytest.mark.asyncio
+async def test_save_file_ensures_ownership_before_write(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+
+    calls = []
+    monkeypatch.setattr(workspace.permissions, "ensure_ownership_sync", lambda root: calls.append(root))
+
+    await workspace.save_file("dem", "dem/ALL/a", "source/note.txt", "текст", config)
+
+    assert calls == [str(project_dir)]
+
+
+def test_make_dir_ensures_ownership_before_write(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+
+    calls = []
+    monkeypatch.setattr(workspace.permissions, "ensure_ownership_sync", lambda root: calls.append(root))
+
+    workspace.make_dir("dem", "dem/ALL/a", "source", "Иванов", config)
+
+    assert calls == [str(project_dir)]
+
+
+def test_save_upload_ensures_ownership_before_write(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+
+    calls = []
+    monkeypatch.setattr(workspace.permissions, "ensure_ownership_sync", lambda root: calls.append(root))
+
+    workspace.save_upload("dem", "dem/ALL/a", "source", "scan.pdf", b"content", config)
+
+    assert calls == [str(project_dir)]
+
+
 def test_make_dir_creates_folder_inside_bucket(tmp_path):
     config = _config(tmp_path)
     project_dir = _write_project(tmp_path, config, "dem/ALL/a")

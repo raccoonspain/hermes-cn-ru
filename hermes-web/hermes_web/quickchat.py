@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
-from . import hermes_client, storage
+from . import hermes_client, permissions, storage
 
 _PROJECT_INDEX_DIR = os.environ.get("PROJECT_INDEX_PLUGIN_DIR")
 if _PROJECT_INDEX_DIR and _PROJECT_INDEX_DIR not in sys.path:
@@ -182,6 +182,8 @@ async def send_message(db_conn, http_session, config: Config, chat_session_id: s
     row = storage.get_chat_session(db_conn, chat_session_id)
     if row is None:
         raise QuickChatError(f"неизвестная сессия чата: {chat_session_id}")
+
+    await permissions.ensure_ownership(row["project_path"])
 
     async for name, payload in hermes_client.stream_chat(
         http_session,

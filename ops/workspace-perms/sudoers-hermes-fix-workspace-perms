@@ -1,0 +1,5 @@
+# Разворачивается на сервере как /etc/sudoers.d/hermes-fix-workspace-perms.
+# Единственная новая привилегия hermes (D-003: без sudo вообще до этого
+# момента) — вызвать ровно этот скрипт без пароля. См. docs/superpowers/
+# specs/2026-07-29-workspace-permissions-self-heal-design.md.
+hermes ALL=(root) NOPASSWD: /usr/local/bin/hermes-fix-workspace-perms.sh *
