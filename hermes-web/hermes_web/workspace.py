@@ -208,8 +208,6 @@ async def save_file(user: str, project_path: str, relative_path: str, content: s
 
     project_root, candidate = resolve_file_path(user, project_path, relative_path, config)
     permissions.ensure_ownership_sync(project_root)
-    if relative_path not in ROOT_EDITABLE_FILES:
-        _require_within_bucket(project_root, candidate)
 
     os.makedirs(os.path.dirname(candidate), exist_ok=True)
     with open(candidate, "w", encoding="utf-8") as fh:

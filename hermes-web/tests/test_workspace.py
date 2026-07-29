@@ -195,11 +195,21 @@ async def test_save_file_rejects_non_editable_extension(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_save_file_rejects_path_outside_bucket(tmp_path):
+async def test_save_file_allows_path_outside_bucket(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+
+    result = await workspace.save_file("dem", "dem/ALL/a", "note.txt", "текст вне бакетов", config)
+    assert (project_dir / "note.txt").read_text(encoding="utf-8") == "текст вне бакетов"
+    assert result["reindexed"] is False
+
+
+@pytest.mark.asyncio
+async def test_save_file_rejects_traversal_outside_project(tmp_path):
     config = _config(tmp_path)
     _write_project(tmp_path, config, "dem/ALL/a")
     with pytest.raises(workspace.WorkspaceError):
-        await workspace.save_file("dem", "dem/ALL/a", "note.txt", "x", config)
+        await workspace.save_file("dem", "dem/ALL/a", "../../etc/passwd.txt", "x", config)
 
 
 @pytest.mark.asyncio
