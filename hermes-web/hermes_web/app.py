@@ -386,6 +386,7 @@ async def handle_project_move_entry(request: web.Request) -> web.Response:
     source = str(body.get("source", ""))
     dest_dir = str(body.get("dest_dir", ""))
     new_name = body.get("new_name")
+    new_name = str(new_name) if new_name is not None else None
     try:
         result = workspace.move_entry(
             user["username"], path, source, dest_dir, new_name, request.app["quickchat_config"],

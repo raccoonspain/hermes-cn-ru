@@ -866,6 +866,28 @@ async def test_project_move_entry_renames(aiohttp_client, app_and_conn, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_project_move_entry_coerces_non_string_new_name(aiohttp_client, app_and_conn, tmp_path):
+    """Finding 5 финального ревью (2026-07-29): path/source/dest_dir уже
+    str(...)-обёрнуты при чтении из тела запроса, а new_name — нет, поэтому
+    нестроковое значение (например int) доходило до move_entry's "/" in name
+    проверки и падало голым TypeError -> 500. Обработчик уже делает похожий
+    loose str()-coercion на остальных полях, поэтому здесь просто принимаем
+    значение как строку, а не отклоняем запрос."""
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/move-entry", json={
+        "path": "dem/ALL/a", "source": "source/note.txt", "dest_dir": "source", "new_name": 5,
+    })
+    assert resp.status != 500
+    assert resp.status == 200
+    assert (project_dir / "source" / "5").exists()
+
+
+@pytest.mark.asyncio
 async def test_project_move_entry_collision_returns_409(aiohttp_client, app_and_conn, tmp_path):
     project_dir = _seed_project(tmp_path, "dem/ALL/a")
     (project_dir / "source").mkdir()

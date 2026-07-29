@@ -738,6 +738,22 @@ function countEntries(node) {
 
 - [ ] **Step 3: Переписать `renderFolderNode` — треугольник, счётчик, кнопка «переместить»**
 
+**Важно (найдено финальным ревью 2026-07-29, Finding 2):** `child.path` в
+`buildMiscTree` — синтетический ключ группировки (строка начинается с
+`'misc/'`, которого не существует на диске — `misc` тут только подпись
+раздела "остального" в этом файле). Он годится как opaque-ключ для
+`data-toggle-path` (localStorage), но НЕ годится для `data-move` — это
+значение уходит на сервер как `source`/резолвится как реальный путь, и
+`misc/<папка>` там не существует, move всегда падает 400 "не найдено".
+Поэтому заодно с этим шагом `buildMiscTree` должна класть на каждый папочный
+узел ещё и `realPath` — реальный относительный путь без префикса `'misc/'`
+(`parts.slice(0, i + 1).join('/')`), а `renderFolderNode` — использовать
+`child.realPath ?? child.path` для `data-move` (для `buildFolderTree`,
+дерева source/outer/result, `realPath` не выставляется, там `path` и так
+реальный путь — `?? child.path` просто оставляет прежнее поведение).
+`path` при этом не меняется, чтобы не терять уже сохранённые ключи
+`expandedPaths` из localStorage.
+
 Заменить всю функцию:
 
 ```js
@@ -750,7 +766,7 @@ function renderFolderNode(node, bucketClass, depth) {
     const hiddenCount = expanded ? 0 : countEntries(child);
     html += `<div class="node folder-${bucketClass}" style="padding-left:${depth * 14}px" data-toggle-path="${escapeHtml(child.path)}">
       <span class="tri">${expanded ? '▼' : '▶'}</span><span class="ic">📁</span><span class="name">${escapeHtml(name)}</span>${hiddenCount ? ` <span class="fcount">(${hiddenCount})</span>` : ''}
-      <button class="move-btn" data-move="${escapeHtml(child.path)}" title="переместить">→</button>
+      <button class="move-btn" data-move="${escapeHtml(child.realPath ?? child.path)}" title="переместить">→</button>
       ${canCreate ? `<button class="new-folder-btn" data-parent="${escapeHtml(child.path)}" title="новая папка">＋</button>` : ''}
     </div>`;
     if (expanded) html += renderFolderNode(child, bucketClass, depth + 1);
@@ -762,6 +778,27 @@ function renderFolderNode(node, bucketClass, depth) {
     </div>`;
   });
   return html;
+}
+```
+
+И в уже существующей (написанной до этого плана) функции `buildMiscTree`
+добавить `realPath` на папочные узлы:
+
+```js
+function buildMiscTree(entries) {
+  const root = { folders: {}, files: [], path: 'misc' };
+  for (const entry of entries) {
+    const parts = entry.relative_path.split('/');
+    let node = root, accPath = 'misc';
+    for (let i = 0; i < parts.length - 1; i++) {
+      accPath += '/' + parts[i];
+      const realPath = parts.slice(0, i + 1).join('/');
+      if (!node.folders[parts[i]]) node.folders[parts[i]] = { folders: {}, files: [], path: accPath, realPath };
+      node = node.folders[parts[i]];
+    }
+    node.files.push({ name: parts[parts.length - 1], entry });
+  }
+  return root;
 }
 ```
 
@@ -831,7 +868,12 @@ Task 5), добавить:
    остальные по-прежнему свёрнуты.
 4. Кнопка «→» на файле — запрашивает папку назначения и имя, после
    подтверждения файл реально переместился (виден в дереве в новом месте).
-5. Кнопка «→» на папке — аналогично, вся папка со содержимым переехала.
+5. Кнопка «→» на папке — аналогично, вся папка со содержимым переехала,
+   **включая папку в разделе «🗂 остальное» (misc), а не только в
+   source/outer/result** — именно этот случай был пропущен изначально
+   (см. финальное ревью 2026-07-29, Finding 2: misc-папки строятся с
+   синтетическим display-путём `misc/...`, который не существует на диске,
+   и без отдельного `realPath` move для них 400-ился всегда).
 6. Попытка переместить в уже занятое имя — видно сообщение об ошибке (409),
    дерево не меняется.
 

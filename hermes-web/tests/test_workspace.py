@@ -232,6 +232,29 @@ async def test_save_root_about_md_triggers_reindex(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_save_about_md_alternative_spelling_triggers_reindex(tmp_path, monkeypatch):
+    # Finding 3 финального ревью (2026-07-29): проверка на reindex раньше
+    # сравнивала сырой relative_path со строкой "about.md" — "./about.md"
+    # (тот же файл, другое написание пути) не совпадал, и индекс молча
+    # оставался устаревшим после успешного сохранения.
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+
+    calls = []
+
+    def fake_index_update(user, project_path, **kwargs):
+        calls.append((user, project_path))
+        return {"path": project_path, "indexed": False, "message": "ok"}
+
+    monkeypatch.setattr(workspace.project_index_core, "index_update", fake_index_update)
+
+    result = await workspace.save_file("dem", "dem/ALL/a", "./about.md", "новый about", config)
+    assert result["reindexed"] is True
+    assert calls == [("dem", "dem/ALL/a")]
+    assert (project_dir / "about.md").read_text(encoding="utf-8") == "новый about"
+
+
+@pytest.mark.asyncio
 async def test_save_nested_about_md_does_not_trigger_reindex(tmp_path, monkeypatch):
     config = _config(tmp_path)
     project_dir = _write_project(tmp_path, config, "dem/ALL/a")
@@ -631,3 +654,20 @@ def test_move_entry_rejects_about_md_via_dot_slash_spelling(tmp_path):
     _write_project(tmp_path, config, "dem/ALL/a")
     with pytest.raises(workspace.WorkspaceError):
         workspace.move_entry("dem", "dem/ALL/a", "./about.md", "result", None, config)
+
+
+def test_move_entry_rejects_dest_dir_that_is_a_file(tmp_path):
+    """Finding 4 финального ревью (2026-07-29): os.makedirs(dest_dir_candidate,
+    exist_ok=True) кидает FileExistsError, если dest_dir_candidate уже
+    существует, но это файл, а не папка — раньше эта ошибка была вне
+    try/except OSError вокруг os.rename и всплывала как голый 500 (см.
+    handle_project_move_entry в app.py). Пользователь легко может ошибиться
+    так через обычный prompt() в moveEntry() на фронтенде."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+    (project_dir / "not_a_dir.txt").write_text("я файл, не папка", encoding="utf-8")
+
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", "not_a_dir.txt", None, config)

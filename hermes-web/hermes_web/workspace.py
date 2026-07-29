@@ -214,7 +214,7 @@ async def save_file(user: str, project_path: str, relative_path: str, content: s
         fh.write(content)
 
     reindexed = False
-    if relative_path == "about.md":
+    if candidate == os.path.join(project_root, "about.md"):
         loop = asyncio.get_running_loop()
         # index_update может дойти до реального HTTP-вызова (эмбеддинг через
         # wormsoft.ru) — тот же повод, что уже закрыт в quickchat.create_quick_chat:
@@ -309,6 +309,8 @@ def move_entry(user: str, project_path: str, source: str, dest_dir: str, new_nam
     if os.path.exists(target):
         raise WorkspaceCollisionError(f"'{name}' уже существует в целевой папке")
 
+    if os.path.exists(dest_dir_candidate) and not os.path.isdir(dest_dir_candidate):
+        raise WorkspaceError(f"'{dest_dir}' — не папка")
     os.makedirs(dest_dir_candidate, exist_ok=True)
     try:
         os.rename(source_candidate, target)

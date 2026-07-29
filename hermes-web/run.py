@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -34,7 +35,26 @@ def _bool_env(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes"}
 
 
+def configure_logging() -> None:
+    """Без этого корневой логгер молчит на уровне WARNING по умолчанию —
+    и logger.info(...) из quickchat.py (диагностика A1: result_target,
+    факт усиления системного сообщения на каждый ход) никогда не строится,
+    не то что не пишется. aiohttp.web.run_app сам вешает обработчик на
+    логгер "aiohttp.access", если у него уровень NOTSET — после нашего
+    basicConfig() это было бы так и без пропуска сюда, отключаем propagate,
+    чтобы access-строки не задваивались через корневой логгер, а поведение
+    access-логов (уже полагается на них systemd journal) не изменилось."""
+    logging.basicConfig(level=logging.INFO)
+    # basicConfig() — no-op, если у root-логгера уже есть handler(ы) (так
+    # бывает в тестах под pytest, где свой logging-плагин может повесить
+    # handler раньше), а без него результата INFO не сохранился бы вообще —
+    # выставляем уровень явно и отдельно, чтобы не зависеть от этого.
+    logging.getLogger().setLevel(logging.INFO)
+    logging.getLogger("aiohttp.access").propagate = False
+
+
 def main() -> None:
+    configure_logging()
     api_server_key = os.environ["API_SERVER_KEY"]
     db_path = os.environ.get("HERMES_WEB_DB_PATH", str(_HERE / "hermes-web.db"))
     host = os.environ.get("HERMES_WEB_HOST", "127.0.0.1")

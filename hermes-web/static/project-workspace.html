@@ -430,13 +430,22 @@ function buildFolderTree(entries, dirs, bucket) {
 }
 
 function buildMiscTree(entries) {
+  // path — синтетический ключ группировки ('misc/...'), используется только
+  // как opaque-ключ localStorage для сворачивания/разворачивания (Task 6).
+  // realPath — реальный относительный путь на диске (без префикса 'misc/',
+  // которого не существует на файловой системе — 'misc' здесь только
+  // группирующая подпись этого файла для показа "остального" вне
+  // source/outer/result). Раньше data-move для папок в этой секции брал
+  // path и отправлял на сервер несуществующий 'misc/...' — 400 "не найдено"
+  // на каждое перемещение папки (см. финальное ревью, Finding 2).
   const root = { folders: {}, files: [], path: 'misc' };
   for (const entry of entries) {
     const parts = entry.relative_path.split('/');
     let node = root, accPath = 'misc';
     for (let i = 0; i < parts.length - 1; i++) {
       accPath += '/' + parts[i];
-      if (!node.folders[parts[i]]) node.folders[parts[i]] = { folders: {}, files: [], path: accPath };
+      const realPath = parts.slice(0, i + 1).join('/');
+      if (!node.folders[parts[i]]) node.folders[parts[i]] = { folders: {}, files: [], path: accPath, realPath };
       node = node.folders[parts[i]];
     }
     node.files.push({ name: parts[parts.length - 1], entry });
@@ -476,7 +485,7 @@ function renderFolderNode(node, bucketClass, depth) {
     const hiddenCount = expanded ? 0 : countEntries(child);
     html += `<div class="node folder-${bucketClass}" style="padding-left:${depth * 14}px" data-toggle-path="${escapeHtml(child.path)}">
       <span class="tri">${expanded ? '▼' : '▶'}</span><span class="ic">📁</span><span class="name">${escapeHtml(name)}</span>${hiddenCount ? ` <span class="fcount">(${hiddenCount})</span>` : ''}
-      <button class="move-btn" data-move="${escapeHtml(child.path)}" title="переместить">→</button>
+      <button class="move-btn" data-move="${escapeHtml(child.realPath ?? child.path)}" title="переместить">→</button>
       ${canCreate ? `<button class="new-folder-btn" data-parent="${escapeHtml(child.path)}" title="новая папка">＋</button>` : ''}
     </div>`;
     if (expanded) html += renderFolderNode(child, bucketClass, depth + 1);
