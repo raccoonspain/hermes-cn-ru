@@ -834,6 +834,89 @@ async def test_project_mkdir_outside_buckets_returns_400(aiohttp_client, app_and
 
 
 @pytest.mark.asyncio
+async def test_project_move_entry_moves_file(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/move-entry", json={
+        "path": "dem/ALL/a", "source": "source/note.txt", "dest_dir": "result", "new_name": None,
+    })
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["relative_path"] == "result/note.txt"
+    assert (project_dir / "result" / "note.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_project_move_entry_renames(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/move-entry", json={
+        "path": "dem/ALL/a", "source": "source/note.txt", "dest_dir": "source", "new_name": "renamed.txt",
+    })
+    assert resp.status == 200
+    assert (project_dir / "source" / "renamed.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_project_move_entry_collision_returns_409(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("1", encoding="utf-8")
+    (project_dir / "result").mkdir()
+    (project_dir / "result" / "note.txt").write_text("2", encoding="utf-8")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/move-entry", json={
+        "path": "dem/ALL/a", "source": "source/note.txt", "dest_dir": "result", "new_name": None,
+    })
+    assert resp.status == 409
+
+
+@pytest.mark.asyncio
+async def test_project_move_entry_missing_source_returns_400(aiohttp_client, app_and_conn, tmp_path):
+    _seed_project(tmp_path, "dem/ALL/a")
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/move-entry", json={
+        "path": "dem/ALL/a", "source": "source/nope.txt", "dest_dir": "result", "new_name": None,
+    })
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_project_move_entry_cross_user_returns_404(aiohttp_client, app_and_conn, tmp_path):
+    project_dir = _seed_project(tmp_path, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "rost", "password": "secret456"})
+    resp = await client.post("/api/projects/move-entry", json={
+        "path": "dem/ALL/a", "source": "source/note.txt", "dest_dir": "result", "new_name": None,
+    })
+    assert resp.status == 404
+    assert (project_dir / "source" / "note.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_project_move_entry_requires_auth(aiohttp_client, app_and_conn):
+    client = await aiohttp_client(app_and_conn)
+    resp = await client.post("/api/projects/move-entry", json={
+        "path": "dem/ALL/a", "source": "source/note.txt", "dest_dir": "result", "new_name": None,
+    })
+    assert resp.status == 401
+
+
+@pytest.mark.asyncio
 async def test_project_upload_saves_file_with_date_prefix(aiohttp_client, app_and_conn, tmp_path):
     import datetime as _dt
     project_dir = _seed_project(tmp_path, "dem/ALL/a")

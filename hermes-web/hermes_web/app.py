@@ -379,6 +379,26 @@ async def handle_project_mkdir(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def handle_project_move_entry(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    path = str(body.get("path", ""))
+    source = str(body.get("source", ""))
+    dest_dir = str(body.get("dest_dir", ""))
+    new_name = body.get("new_name")
+    try:
+        result = workspace.move_entry(
+            user["username"], path, source, dest_dir, new_name, request.app["quickchat_config"],
+        )
+    except workspace.WorkspaceCollisionError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except workspace.WorkspaceError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except projects.project_index_core.ProjectIndexError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    return web.json_response(result)
+
+
 async def handle_project_upload(request: web.Request) -> web.Response:
     user = _require_user(request)
     reader = await request.multipart()
@@ -467,6 +487,7 @@ def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secur
     app.router.add_get("/api/projects/file", handle_project_file_get)
     app.router.add_post("/api/projects/file", handle_project_file_post)
     app.router.add_post("/api/projects/mkdir", handle_project_mkdir)
+    app.router.add_post("/api/projects/move-entry", handle_project_move_entry)
     app.router.add_post("/api/projects/upload", handle_project_upload)
     app.router.add_get("/", handle_root)
     app.router.add_static("/", static_dir, show_index=False)
