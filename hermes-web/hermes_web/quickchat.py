@@ -99,6 +99,8 @@ async def _new_hermes_session(http_session, config: Config) -> str:
 
 
 def _is_valid_result_target(result_target: str) -> bool:
+    if not isinstance(result_target, str):
+        return False
     if result_target == "result":
         return True
     if not result_target.startswith("result/"):

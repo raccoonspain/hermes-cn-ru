@@ -225,6 +225,13 @@ def test_is_valid_result_target_rejects_traversal_and_other_buckets():
     assert quickchat._is_valid_result_target("") is False
 
 
+def test_is_valid_result_target_rejects_non_string_without_raising():
+    assert quickchat._is_valid_result_target(123) is False
+    assert quickchat._is_valid_result_target(True) is False
+    assert quickchat._is_valid_result_target(["result"]) is False
+    assert quickchat._is_valid_result_target(None) is False
+
+
 def test_system_message_adds_result_target_instruction_when_valid():
     msg = quickchat._system_message_for("/workspace/dem/ALL/x", result_target="result/kirik")
     assert "/workspace/dem/ALL/x/result/kirik" in msg

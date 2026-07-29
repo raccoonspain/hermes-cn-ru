@@ -158,6 +158,38 @@ async def test_send_message_omits_result_target_when_absent(aiohttp_client, app_
 
 
 @pytest.mark.asyncio
+async def test_send_message_non_string_result_target_does_not_crash_sse_stream(
+    aiohttp_client, app_and_conn, monkeypatch, tmp_path,
+):
+    # Финальное ревью, finding "Important": result_target из тела запроса не
+    # приводится к str (в отличие от text), а _is_valid_result_target раньше
+    # предполагал, что аргумент всегда str, и падал с AttributeError на
+    # .startswith для нестроковых значений (например {"result_target": 123}).
+    # Падение происходило внутри async-генератора уже после response.prepare()
+    # — клиент получал оборванный SSE-поток вместо event: error/event: done.
+    # Здесь используется настоящий quickchat.send_message (без подмены), чтобы
+    # доказать фикс на том же уровне, где баг наблюдался изначально — подменён
+    # только hermes_client.stream_chat, самый нижний уровень.
+    conn = app_and_conn["db"]
+    host_project_path = str(tmp_path / "workspace" / "dem" / "ALL" / "x")
+    storage.create_chat_session(conn, "chat1", "dem", host_project_path, "web_x", created_at=1.0)
+
+    async def fake_stream_chat(http_session, base_url, api_key, hermes_session_id, message, system_message=None):
+        yield "assistant.delta", {"delta": "ok"}
+        yield "done", {}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.hermes_client.stream_chat", fake_stream_chat)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/chat/chat1/send", json={"text": "hi", "result_target": 123})
+    assert resp.status == 200
+    body = (await resp.read()).decode("utf-8")
+    assert "event: error" not in body
+    assert "event: done" in body
+
+
+@pytest.mark.asyncio
 async def test_send_message_emits_heartbeat_during_silent_gap(aiohttp_client, app_and_conn, monkeypatch):
     # Держим SSE-соединение живым во время долгих тихих пауз агента (ждёт
     # ответа wormsoft.ru, гоняет докер) — иначе прокси/браузер обрывают
