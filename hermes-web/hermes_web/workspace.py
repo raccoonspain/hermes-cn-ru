@@ -24,6 +24,8 @@ if _PROJECT_INDEX_DIR and _PROJECT_INDEX_DIR not in sys.path:
 
 from project_index import core as project_index_core  # noqa: E402
 
+from . import permissions
+
 BUCKETS = ("source", "outer", "result")
 ROOT_EDITABLE_FILES = ("about.md", "AGENTS.md", "history.md")
 EDITABLE_EXTENSIONS = (".md", ".txt")
@@ -201,6 +203,7 @@ async def save_file(user: str, project_path: str, relative_path: str, content: s
         raise WorkspaceError(f"недопустимое расширение для сохранения: {ext or '(нет)'}")
 
     project_root, candidate = resolve_file_path(user, project_path, relative_path, config)
+    permissions.ensure_ownership_sync(project_root)
     if relative_path not in ROOT_EDITABLE_FILES:
         _require_within_bucket(project_root, candidate)
 
@@ -227,6 +230,7 @@ def make_dir(user: str, project_path: str, parent: str, name: str, config) -> di
         raise WorkspaceError(f"недопустимое имя папки: '{name}'")
 
     project_root, parent_candidate = resolve_file_path(user, project_path, parent, config)
+    permissions.ensure_ownership_sync(project_root)
     _require_within_bucket(project_root, parent_candidate)
 
     target = os.path.realpath(os.path.join(parent_candidate, name))
@@ -245,6 +249,7 @@ def save_upload(user: str, project_path: str, target_dir: str, filename: str, co
         raise WorkspaceError(f"недопустимое имя файла: '{filename}'")
 
     project_root, target_dir_candidate = resolve_file_path(user, project_path, target_dir, config)
+    permissions.ensure_ownership_sync(project_root)
     _require_within_bucket(project_root, target_dir_candidate)
 
     dated_name = _add_date_prefix(safe_name)
