@@ -483,7 +483,6 @@ function renderTree(tree) {
   document.querySelectorAll('.tree .node.file').forEach(n => {
     n.addEventListener('click', () => {
       const relpath = n.dataset.relpath;
-      if (n.classList.contains('folder-misc')) { downloadFile(relpath); return; }
       if (/\.(md|txt)$/i.test(relpath)) openEditor(relpath);
       else downloadFile(relpath);
     });
