@@ -21,6 +21,50 @@
 
 <!-- Новые записи добавляй СВЕРХУ, сразу под этой строкой -->
 
+## 2026-07-29 — Живой прогон (разбор Кирика 3.23–3.29) снова упёрся в root-owned файлы; реализована и задеплоена автоматическая самопочинка владельца workspace
+
+- Заказчик в живом чате попросил разобрать задачу 3.23 — агент застрял:
+  `write_file`/`execute_code`/ручной `chmod 777` (одобренный в чате) —
+  всё «permission denied» в `physics-tasks/3-kirik-3-23-29/`. Разобрались
+  по SSH напрямую (root + `hermes`): 4 записи в этом дереве оказались
+  `root:root`, хотя всё остальное дерево (`/home/hermes/workspace`) —
+  `hermes:hermes`. Причина — тот же класс бага, что и D-011 и открытый
+  upstream-issue [hermes-agent#32049](https://github.com/NousResearch/hermes-agent/issues/32049):
+  `mkdir` внутри Docker-песочницы иногда отрабатывает от `root`, а не от
+  хостового uid, вопреки `docker_run_as_host_user: true` — и починить
+  такую запись способен только root, кто бы ни владел папкой вокруг
+  (владение конкретным *файлом*, а не право на директорию, где он лежит).
+  Разово почистили (`chown -R hermes:hermes` под root) — живая сессия
+  разблокирована.
+- **Автоматизировали, чтобы больше не чинить руками**: спек
+  ([2026-07-29-workspace-permissions-self-heal-design.md](./superpowers/specs/2026-07-29-workspace-permissions-self-heal-design.md))
+  + план ([2026-07-29-workspace-permissions-self-heal.md](./superpowers/plans/2026-07-29-workspace-permissions-self-heal.md)),
+  TDD, 4 задачи:
+  1. Новый модуль `hermes_web/permissions.py` — `ensure_ownership_sync`/
+     `ensure_ownership`, никогда не бросают исключение (самолечение "по
+     возможности").
+  2. `quickchat.send_message` чинит владельца проекта перед каждым ходом
+     чата — до диспатча в Hermes.
+  3. `workspace.save_file`/`make_dir`/`save_upload` чинят владельца перед
+     каждой файловой операцией из UI (тот же класс сбоя мог заблокировать
+     и человека, не только агента).
+  4. Root-скрипт `/usr/local/bin/hermes-fix-workspace-perms.sh` (сам
+     перепроверяет `readlink -f` против `/home/hermes/workspace`, тот же
+     defense-in-depth, что уже закрыл path traversal в `move_project`/
+     `save_upload`) + узкая sudoers-строка — единственная новая привилегия
+     `hermes` (D-003: без sudo вообще до этого момента) — вызвать ровно
+     этот один скрипт без пароля.
+- 163 теста проходят локально (было 155, +8 новых). Задеплоено на VPS:
+  скрипт + sudoers (`visudo -c` зелёный), `rsync` трёх файлов +
+  `systemctl --user restart hermes-web.service`.
+- **Живая приёмка**: намеренно испортили владельца целого тестового
+  проекта (`qa_temp/ALL/perm-test`, вся ветка от `about.md` до вложенной
+  папки — `root:root`) под root, вызвали `workspace.save_file` тем же
+  кодом, что дёргает реальный HTTP-эндпоинт — запись прошла успешно
+  **без единого ручного `chmod`**, дерево оказалось `hermes:hermes` после
+  вызова. `qa_temp` удалён.
+- Связанные решения: D-012 (см. `decisions.md`), продолжает D-011.
+
 ## 2026-07-28 — Живая приёмка 4 фиксов: задеплоено, найдены и исправлены ещё 2 проблемы (расхождение живой ленты + write_file терял файлы), qa_temp удалён
 
 - Задеплоили на VPS все 4 фикса живого чата из предыдущей записи (`rsync`
