@@ -98,6 +98,15 @@ async def _new_hermes_session(http_session, config: Config) -> str:
     return hermes_session_id
 
 
+def _is_valid_result_target(result_target: str) -> bool:
+    if result_target == "result":
+        return True
+    if not result_target.startswith("result/"):
+        return False
+    segments = result_target[len("result/"):].split("/")
+    return all(segment and segment not in (".", "..") for segment in segments)
+
+
 async def create_quick_chat(db_conn, http_session, config: Config, user: str) -> dict:
     today = datetime.date.today().isoformat()
     slug = f"{today}_chat-{uuid.uuid4().hex[:8]}"
@@ -158,8 +167,8 @@ async def get_or_open_session(db_conn, http_session, config: Config, user: str, 
     return {"chat_session_id": chat_session_id, "project_path": resolved, "hermes_session_id": hermes_session_id}
 
 
-def _system_message_for(project_path: str) -> str:
-    return (
+def _system_message_for(project_path: str, result_target: str | None = None) -> str:
+    message = (
         f"Текущий проект: {project_path}. "
         "Готовые файлы (решения, отчёты, сгенерированные документы) клади в "
         "подпапку result/ внутри этого проекта — оттуда их видно и можно "
@@ -176,9 +185,20 @@ def _system_message_for(project_path: str) -> str:
         "сообщил об ошибке или отказе, файл не сохранён, не пиши "
         "пользователю, что всё готово."
     )
+    if result_target and _is_valid_result_target(result_target):
+        message += (
+            " Пользователь указал целевую папку для результата этого хода: "
+            f"{project_path}/{result_target}. Клади готовые файлы именно туда. "
+            "Если считаешь, что это не подходящее место для результата этого "
+            "хода — спроси пользователя перед сохранением, а не сохраняй молча "
+            "в другое место."
+        )
+    return message
 
 
-async def send_message(db_conn, http_session, config: Config, chat_session_id: str, text: str) -> AsyncIterator[tuple[str, dict]]:
+async def send_message(
+    db_conn, http_session, config: Config, chat_session_id: str, text: str, result_target: Optional[str] = None,
+) -> AsyncIterator[tuple[str, dict]]:
     row = storage.get_chat_session(db_conn, chat_session_id)
     if row is None:
         raise QuickChatError(f"неизвестная сессия чата: {chat_session_id}")
@@ -191,7 +211,7 @@ async def send_message(db_conn, http_session, config: Config, chat_session_id: s
         config.hermes_api_key,
         row["hermes_session_id"],
         text,
-        system_message=_system_message_for(_sandbox_project_path(config, row["project_path"])),
+        system_message=_system_message_for(_sandbox_project_path(config, row["project_path"]), result_target),
     ):
         yield name, payload
 

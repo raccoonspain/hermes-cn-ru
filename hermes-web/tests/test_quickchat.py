@@ -210,6 +210,61 @@ def test_system_message_points_deliverables_to_result_bucket():
     assert "result/" in msg
 
 
+def test_is_valid_result_target_accepts_root_and_nested():
+    assert quickchat._is_valid_result_target("result") is True
+    assert quickchat._is_valid_result_target("result/kirik") is True
+    assert quickchat._is_valid_result_target("result/kirik/3-23-29") is True
+
+
+def test_is_valid_result_target_rejects_traversal_and_other_buckets():
+    assert quickchat._is_valid_result_target("result/..") is False
+    assert quickchat._is_valid_result_target("../etc") is False
+    assert quickchat._is_valid_result_target("source/x") is False
+    assert quickchat._is_valid_result_target("resultx") is False
+    assert quickchat._is_valid_result_target("result/") is False
+    assert quickchat._is_valid_result_target("") is False
+
+
+def test_system_message_adds_result_target_instruction_when_valid():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x", result_target="result/kirik")
+    assert "/workspace/dem/ALL/x/result/kirik" in msg
+    assert "спроси пользователя" in msg
+
+
+def test_system_message_ignores_invalid_result_target():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x", result_target="../etc")
+    assert "спроси пользователя" not in msg
+    assert "../etc" not in msg
+
+
+def test_system_message_without_result_target_unchanged():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x")
+    assert "спроси пользователя" not in msg
+
+
+@pytest.mark.asyncio
+async def test_send_message_forwards_result_target_to_system_message(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    host_project_path = str(tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_x")
+    storage.create_chat_session(conn, "chat1", "dem", host_project_path, "web_x", created_at=1.0)
+
+    captured = {}
+
+    async def fake_stream_chat(http_session, base_url, api_key, hermes_session_id, message, system_message=None):
+        captured["system_message"] = system_message
+        yield "done", {}
+
+    monkeypatch.setattr(quickchat.hermes_client, "stream_chat", fake_stream_chat)
+
+    async for _ in quickchat.send_message(
+        conn, http_session=None, config=config, chat_session_id="chat1", text="привет", result_target="result/kirik",
+    ):
+        pass
+
+    assert "/workspace/dem/ALL/2026-07-26_x/result/kirik" in captured["system_message"]
+
+
 @pytest.mark.asyncio
 async def test_send_message_unknown_chat_session_raises(tmp_path):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
