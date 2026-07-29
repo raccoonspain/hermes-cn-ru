@@ -138,6 +138,10 @@
       <span>папка для вложений:</span>
       <select id="uploadTargetSelect"></select>
     </div>
+    <div class="upload-target-row">
+      <span>папка для результата:</span>
+      <select id="resultTargetSelect"></select>
+    </div>
     <div class="compose-box">
       <button class="icon-btn" id="attachBtn" title="прикрепить файлы">📎</button>
       <textarea id="composeInput" rows="1" placeholder="Написать Hermes… (Ctrl+V — вставить изображение из буфера)"></textarea>
@@ -180,12 +184,6 @@ let messages = [];
 let recoveryStatus = null;
 let currentTree = null;
 let pendingAttachments = [];
-// list_tree на бэкенде отдаёт только записи файлов из os.walk — папка без
-// единого файла в ней вообще не попадает в ответ. Чтобы только что созданная
-// пустая папка сразу была видна в дереве и доступна для выбора при загрузке,
-// держим её путь здесь в рамках сессии страницы (переживёт до первого файла
-// внутри неё либо до перезагрузки страницы — это ожидаемое ограничение).
-let manuallyCreatedFolders = new Set();
 
 function escapeHtml(s) {
   const div = document.createElement('div');
@@ -400,7 +398,7 @@ function renderFilesTab(tree, fileIndex) {
   document.querySelectorAll('#pane-files [data-jump-idx]').forEach(btn => btn.addEventListener('click', () => jumpToMessage(Number(btn.dataset.jumpIdx))));
 }
 
-function buildFolderTree(entries, bucket) {
+function buildFolderTree(entries, dirs, bucket) {
   const root = { folders: {}, files: [], path: bucket };
   for (const entry of entries) {
     const parts = entry.relative_path.split('/').slice(1);
@@ -412,11 +410,9 @@ function buildFolderTree(entries, bucket) {
     }
     node.files.push({ name: parts[parts.length - 1], entry });
   }
-  // list_tree отдаёт только файлы из os.walk — папка без единого файла в
-  // ней вообще не приходит в ответе. Подмешиваем сюда папки, созданные в
-  // этой сессии через "＋папка", чтобы они сразу были видны в дереве.
-  manuallyCreatedFolders.forEach(fullPath => {
-    if (fullPath !== bucket && !fullPath.startsWith(bucket + '/')) return;
+  // list_tree отдаёт {bucket}_dirs отдельным полем (включая пустые папки) —
+  // подмешиваем их сюда, чтобы папка без единого файла тоже была видна.
+  (dirs || []).forEach(fullPath => {
     const parts = fullPath.split('/').slice(1);
     let node = root, accPath = bucket;
     for (const part of parts) {
@@ -470,7 +466,7 @@ function renderTree(tree) {
 
   ['source', 'outer', 'result'].forEach(bucket => {
     html += `<div class="glabel">${labels[bucket]}<button class="new-folder-btn" data-parent="${bucket}" title="новая папка">＋папка</button></div>`;
-    html += renderFolderNode(buildFolderTree(tree[bucket] || [], bucket), bucket, 0);
+    html += renderFolderNode(buildFolderTree(tree[bucket] || [], tree[bucket + '_dirs'] || [], bucket), bucket, 0);
   });
 
   if ((tree.misc || []).length) {
@@ -507,8 +503,6 @@ function renderTree(tree) {
         alert('Не удалось создать папку: ' + (body.error || resp.status));
         return;
       }
-      const body = await resp.json();
-      if (body.relative_path) manuallyCreatedFolders.add(body.relative_path);
       await refreshTreeAndFiles();
     });
   });
@@ -519,24 +513,24 @@ function renderFolderOptions(tree) {
   const options = [];
   ['source', 'outer', 'result'].forEach(bucket => {
     options.push(bucket);
-    const dirs = new Set();
-    (tree[bucket] || []).forEach(e => {
-      const parts = e.relative_path.split('/');
-      for (let i = 1; i < parts.length - 1; i++) dirs.add(parts.slice(0, i + 1).join('/'));
-    });
-    // Папки, созданные в этой сессии и ещё не содержащие файлов, не попадают
-    // в tree[bucket] (list_tree их не видит) — добавляем их сюда вручную,
-    // иначе выбрать такую папку целью загрузки будет невозможно.
-    manuallyCreatedFolders.forEach(p => {
-      if (p !== bucket && !p.startsWith(bucket + '/')) return;
-      const parts = p.split('/');
-      for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i + 1).join('/'));
-    });
-    [...dirs].sort().forEach(d => options.push(d));
+    (tree[bucket + '_dirs'] || []).forEach(d => options.push(d));
   });
   const previous = select.value;
   select.innerHTML = options.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
   if (options.includes(previous)) select.value = previous;
+}
+
+function resultTargetStorageKey() {
+  return `hermes-web:result-target:${projectPath}`;
+}
+
+function renderResultTargetOptions(tree) {
+  const select = document.getElementById('resultTargetSelect');
+  const options = ['result', ...(tree.result_dirs || [])];
+  const stored = localStorage.getItem(resultTargetStorageKey());
+  const previous = select.value || stored || 'result';
+  select.innerHTML = options.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
+  select.value = options.includes(previous) ? previous : 'result';
 }
 
 async function loadTreeAndRender() {
@@ -545,6 +539,7 @@ async function loadTreeAndRender() {
   currentTree = await resp.json();
   renderTree(currentTree);
   renderFolderOptions(currentTree);
+  renderResultTargetOptions(currentTree);
   return currentTree;
 }
 
@@ -645,7 +640,11 @@ async function sendMessage() {
 
   try {
     const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/send`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: fullText }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: fullText,
+        result_target: document.getElementById('resultTargetSelect').value || 'result',
+      }),
     });
     if (resp.status === 401) { location.href = 'login.html'; return; }
     if (!resp.ok) {
@@ -775,6 +774,9 @@ document.getElementById('composeInput').addEventListener('paste', async (e) => {
   const files = [];
   for (const it of items) if (it.type.startsWith('image/')) files.push(it.getAsFile());
   if (files.length) await uploadPending(files, document.getElementById('uploadTargetSelect').value || 'source');
+});
+document.getElementById('resultTargetSelect').addEventListener('change', () => {
+  localStorage.setItem(resultTargetStorageKey(), document.getElementById('resultTargetSelect').value);
 });
 
 document.querySelectorAll('.side-tabs button').forEach(b => {
