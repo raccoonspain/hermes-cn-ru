@@ -35,6 +35,10 @@
   .tree .glabel:first-child{margin-top:0}
   .new-folder-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
   .new-folder-btn:hover{color:var(--text);border-color:var(--gold)}
+  .node .tri{width:10px;text-align:center;flex-shrink:0;font-size:9px;color:var(--text-dim)}
+  .node .fcount{font-size:10px;color:var(--text-dim)}
+  .move-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
+  .move-btn:hover{color:var(--text);border-color:var(--violet)}
   .node{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-dim)}
   .node:hover{background:var(--panel);color:var(--text)}
   .node .ic{width:15px;text-align:center;flex-shrink:0;font-size:12px}
@@ -174,6 +178,7 @@
 <script src="app.js"></script>
 <script>
 let projectPath = null;
+let expandedPaths = new Set();
 let chatSessionId = null;
 let messages = [];
 // Индикатор восстановления после обрыва SSE-потока (recoverAfterStreamDrop) —
@@ -439,20 +444,47 @@ function buildMiscTree(entries) {
   return root;
 }
 
+function expandedStorageKey() {
+  return `hermes-web:tree-expanded:${projectPath}`;
+}
+
+function loadExpandedPaths() {
+  try {
+    const raw = localStorage.getItem(expandedStorageKey());
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveExpandedPaths() {
+  localStorage.setItem(expandedStorageKey(), JSON.stringify([...expandedPaths]));
+}
+
+function countEntries(node) {
+  let count = node.files.length;
+  Object.values(node.folders).forEach(child => { count += 1 + countEntries(child); });
+  return count;
+}
+
 function renderFolderNode(node, bucketClass, depth) {
   let html = '';
   const canCreate = bucketClass !== 'misc';
   Object.keys(node.folders).sort().forEach(name => {
     const child = node.folders[name];
-    html += `<div class="node folder-${bucketClass}" style="padding-left:${depth * 14}px">
-      <span class="ic">📁</span><span class="name">${escapeHtml(name)}</span>
+    const expanded = expandedPaths.has(child.path);
+    const hiddenCount = expanded ? 0 : countEntries(child);
+    html += `<div class="node folder-${bucketClass}" style="padding-left:${depth * 14}px" data-toggle-path="${escapeHtml(child.path)}">
+      <span class="tri">${expanded ? '▼' : '▶'}</span><span class="ic">📁</span><span class="name">${escapeHtml(name)}</span>${hiddenCount ? ` <span class="fcount">(${hiddenCount})</span>` : ''}
+      <button class="move-btn" data-move="${escapeHtml(child.path)}" title="переместить">→</button>
       ${canCreate ? `<button class="new-folder-btn" data-parent="${escapeHtml(child.path)}" title="новая папка">＋</button>` : ''}
     </div>`;
-    html += renderFolderNode(child, bucketClass, depth + 1);
+    if (expanded) html += renderFolderNode(child, bucketClass, depth + 1);
   });
   node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
     html += `<div class="node file folder-${bucketClass}" style="padding-left:${depth * 14 + 20}px" data-relpath="${escapeHtml(f.entry.relative_path)}">
       <span class="ic">${iconFor(f.name)}</span><span class="name">${escapeHtml(f.name)}</span>
+      <button class="move-btn" data-move="${escapeHtml(f.entry.relative_path)}" title="переместить">→</button>
     </div>`;
   });
   return html;
@@ -485,6 +517,17 @@ function renderTree(tree) {
       const relpath = n.dataset.relpath;
       if (/\.(md|txt)$/i.test(relpath)) openEditor(relpath);
       else downloadFile(relpath);
+    });
+  });
+  document.querySelectorAll('.tree [data-move]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); moveEntry(btn.dataset.move); });
+  });
+  document.querySelectorAll('.tree [data-toggle-path]').forEach(row => {
+    row.addEventListener('click', () => {
+      const path = row.dataset.togglePath;
+      if (expandedPaths.has(path)) expandedPaths.delete(path); else expandedPaths.add(path);
+      saveExpandedPaths();
+      renderTree(currentTree);
     });
   });
   document.querySelectorAll('.new-folder-btn').forEach(btn => {
@@ -571,6 +614,30 @@ async function saveEditor(relpath) {
     return;
   }
   document.getElementById('overlay').classList.remove('on');
+  await refreshTreeAndFiles();
+}
+
+function moveEntryDefaultDestDir(relpath) {
+  const idx = relpath.lastIndexOf('/');
+  return idx === -1 ? '.' : relpath.slice(0, idx);
+}
+
+async function moveEntry(relpath) {
+  const currentName = relpath.split('/').pop();
+  const destDir = prompt('Переместить в папку (например result или result/kirik):', moveEntryDefaultDestDir(relpath));
+  if (destDir === null) return;
+  const newName = prompt('Имя (можно оставить как есть):', currentName);
+  if (!newName) return;
+  const resp = await apiFetch('/api/projects/move-entry', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: projectPath, source: relpath, dest_dir: destDir, new_name: newName }),
+  });
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    alert('Не удалось переместить: ' + (body.error || resp.status));
+    return;
+  }
   await refreshTreeAndFiles();
 }
 
@@ -801,6 +868,7 @@ document.querySelectorAll('.side-tabs button').forEach(b => {
   const openBody = await openResp.json();
   chatSessionId = openBody.chat_session_id;
   projectPath = openBody.project_path;
+  expandedPaths = loadExpandedPaths();
   document.getElementById('projectTitle').textContent = projectPath;
 
   const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
