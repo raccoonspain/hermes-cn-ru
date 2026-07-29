@@ -623,3 +623,11 @@ def test_move_entry_ensures_ownership_before_write(tmp_path, monkeypatch):
     workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", "result", None, config)
 
     assert calls == [str(project_dir)]
+
+
+def test_move_entry_rejects_about_md_via_dot_slash_spelling(tmp_path):
+    """Regression: ensure path normalization catches alternative spellings like ./about.md"""
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.move_entry("dem", "dem/ALL/a", "./about.md", "result", None, config)

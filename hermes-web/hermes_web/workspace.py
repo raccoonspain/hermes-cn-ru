@@ -289,8 +289,11 @@ def move_entry(user: str, project_path: str, source: str, dest_dir: str, new_nam
 
     if not os.path.exists(source_candidate):
         raise WorkspaceError(f"'{source}' не найден")
-    if source_candidate == project_root or source in ROOT_EDITABLE_FILES:
+    if source_candidate == project_root:
         raise WorkspaceError(f"'{source}' нельзя перемещать")
+    for root_file in ROOT_EDITABLE_FILES:
+        if source_candidate == os.path.join(project_root, root_file):
+            raise WorkspaceError(f"'{source}' нельзя перемещать")
     for bucket in BUCKETS:
         if source_candidate == os.path.join(project_root, bucket):
             raise WorkspaceError(f"'{source}' нельзя перемещать — это сам bucket '{bucket}'")
