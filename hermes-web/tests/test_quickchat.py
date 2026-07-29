@@ -382,3 +382,60 @@ async def test_get_or_open_session_leaves_no_orphan_when_hermes_fails(tmp_path, 
         await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
 
     assert storage.get_chat_session_for_project(conn, "dem", str(project_dir)) is None
+
+
+@pytest.mark.asyncio
+async def test_send_message_logs_result_target_and_reinforcement(tmp_path, monkeypatch, caplog):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    host_project_path = str(tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_x")
+    storage.create_chat_session(conn, "chat1", "dem", host_project_path, "web_x", created_at=1.0)
+
+    async def fake_ensure_ownership(project_root):
+        pass
+
+    monkeypatch.setattr(quickchat.permissions, "ensure_ownership", fake_ensure_ownership)
+
+    async def fake_stream_chat(http_session, base_url, api_key, hermes_session_id, message, system_message=None):
+        yield "done", {}
+
+    monkeypatch.setattr(quickchat.hermes_client, "stream_chat", fake_stream_chat)
+
+    with caplog.at_level("INFO", logger="hermes_web.quickchat"):
+        async for _ in quickchat.send_message(
+            conn, http_session=None, config=config, chat_session_id="chat1", text="привет",
+            result_target="result/kirik",
+        ):
+            pass
+
+    assert "chat_session_id=chat1" in caplog.text
+    assert "result_target='result/kirik'" in caplog.text
+    assert "reinforced=True" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_message_logs_missing_result_target_as_not_reinforced(tmp_path, monkeypatch, caplog):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    host_project_path = str(tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_y")
+    storage.create_chat_session(conn, "chat2", "dem", host_project_path, "web_y", created_at=1.0)
+
+    async def fake_ensure_ownership(project_root):
+        pass
+
+    monkeypatch.setattr(quickchat.permissions, "ensure_ownership", fake_ensure_ownership)
+
+    async def fake_stream_chat(http_session, base_url, api_key, hermes_session_id, message, system_message=None):
+        yield "done", {}
+
+    monkeypatch.setattr(quickchat.hermes_client, "stream_chat", fake_stream_chat)
+
+    with caplog.at_level("INFO", logger="hermes_web.quickchat"):
+        async for _ in quickchat.send_message(
+            conn, http_session=None, config=config, chat_session_id="chat2", text="привет",
+        ):
+            pass
+
+    assert "chat_session_id=chat2" in caplog.text
+    assert "result_target=None" in caplog.text
+    assert "reinforced=False" in caplog.text

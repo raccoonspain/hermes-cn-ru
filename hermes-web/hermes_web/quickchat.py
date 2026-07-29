@@ -29,6 +29,10 @@ if _PROJECT_INDEX_DIR and _PROJECT_INDEX_DIR not in sys.path:
 
 from project_index import core as project_index_core  # noqa: E402
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class QuickChatError(Exception):
     """Raised for expected, user-facing failures (unknown chat session, etc.)."""
@@ -206,6 +210,12 @@ async def send_message(
         raise QuickChatError(f"неизвестная сессия чата: {chat_session_id}")
 
     await permissions.ensure_ownership(row["project_path"])
+
+    reinforced = bool(result_target and _is_valid_result_target(result_target))
+    logger.info(
+        "chat_session_id=%s result_target=%r reinforced=%s",
+        chat_session_id, result_target, reinforced,
+    )
 
     async for name, payload in hermes_client.stream_chat(
         http_session,
