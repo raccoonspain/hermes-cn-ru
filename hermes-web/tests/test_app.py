@@ -152,6 +152,9 @@ async def test_send_message_omits_result_target_when_absent(aiohttp_client, app_
     await client.post("/login", json={"username": "dem", "password": "secret123"})
     resp = await client.post("/api/chat/chat1/send", json={"text": "привет"})
     assert resp.status == 200
+    body = (await resp.read()).decode("utf-8")
+    assert "event: error" not in body
+    assert "event: done" in body
 
 
 @pytest.mark.asyncio
