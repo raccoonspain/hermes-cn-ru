@@ -124,6 +124,31 @@ async def test_create_quick_chat_runs_index_update_without_blocking_event_loop(t
 
 
 @pytest.mark.asyncio
+async def test_create_quick_chat_creates_agents_and_history_md(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    result = await quickchat.create_quick_chat(conn, http_session=None, config=config, user="dem")
+
+    agents_path = os.path.join(result["project_path"], "AGENTS.md")
+    history_path = os.path.join(result["project_path"], "history.md")
+    assert os.path.isfile(agents_path)
+    assert os.path.isfile(history_path)
+
+    agents_text = open(agents_path, encoding="utf-8").read()
+    assert "result/" in agents_text
+    assert "history.md" in agents_text
+
+    history_text = open(history_path, encoding="utf-8").read()
+    assert "append-only" in history_text
+
+
+@pytest.mark.asyncio
 async def test_send_message_forwards_project_path_as_system_message(tmp_path, monkeypatch):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)
@@ -197,6 +222,51 @@ def test_sandbox_project_path_leaves_non_matching_path_untouched(tmp_path):
     assert quickchat._sandbox_project_path(config, "/some/other/path") == "/some/other/path"
 
 
+def test_agents_md_block_returns_empty_when_file_missing(tmp_path):
+    assert quickchat._agents_md_block(str(tmp_path / "nope")) == ""
+
+
+def test_agents_md_block_returns_content_when_present(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").write_text("# Мои правила\nПишем тесты.", encoding="utf-8")
+
+    block = quickchat._agents_md_block(str(project_dir))
+
+    assert "Конвенции проекта (AGENTS.md):" in block
+    assert "Мои правила" in block
+
+
+def test_agents_md_block_truncates_when_too_long(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").write_text("x" * (quickchat.AGENTS_MD_MAX_CHARS + 1000), encoding="utf-8")
+
+    block = quickchat._agents_md_block(str(project_dir))
+
+    assert "[...обрезано, полный текст в AGENTS.md]" in block
+    assert len(block) < quickchat.AGENTS_MD_MAX_CHARS + 1000
+
+
+def test_agents_md_block_returns_empty_for_blank_file(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").write_text("   \n\n  ", encoding="utf-8")
+    assert quickchat._agents_md_block(str(project_dir)) == ""
+
+
+def test_agents_md_block_logs_and_returns_empty_on_read_error(tmp_path, caplog):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").mkdir()  # директория вместо файла → open() кидает OSError
+
+    with caplog.at_level("WARNING", logger="hermes_web.quickchat"):
+        block = quickchat._agents_md_block(str(project_dir))
+
+    assert block == ""
+    assert "AGENTS.md" in caplog.text
+
+
 def test_system_message_requires_absolute_sandbox_path():
     msg = quickchat._system_message_for("/workspace/dem/ALL/2026-07-26_x")
     assert "write_file" in msg or "read_file" in msg
@@ -249,6 +319,39 @@ def test_system_message_without_result_target_unchanged():
     assert "спроси пользователя" not in msg
 
 
+def test_system_message_appends_agents_md_block_when_provided():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x", agents_md_block="\n\nКонвенции проекта (AGENTS.md):\nМои правила")
+    assert "Конвенции проекта (AGENTS.md):" in msg
+    assert "Мои правила" in msg
+
+
+def test_system_message_agents_md_block_defaults_to_empty():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x")
+    assert "Конвенции проекта (AGENTS.md):" not in msg
+
+
+def test_system_message_uses_fallback_conventions_when_agents_md_block_empty():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x")
+    assert "подпапку result/" in msg
+    assert "проверь ответ инструмента" in msg
+
+
+def test_system_message_does_not_duplicate_conventions_when_agents_md_block_present():
+    msg = quickchat._system_message_for(
+        "/workspace/dem/ALL/x", agents_md_block="\n\nКонвенции проекта (AGENTS.md):\nМои правила",
+    )
+    assert msg.count("подпапку result/") == 0  # fallback text absent — только то, что принёс agents_md_block
+    assert msg.count("Мои правила") == 1
+
+
+def test_system_message_agents_md_block_comes_after_result_target_hint():
+    msg = quickchat._system_message_for(
+        "/workspace/dem/ALL/x", result_target="result/kirik",
+        agents_md_block="\n\nКонвенции проекта (AGENTS.md):\nМои правила",
+    )
+    assert msg.index("спроси пользователя") < msg.index("Конвенции проекта (AGENTS.md):")
+
+
 @pytest.mark.asyncio
 async def test_send_message_forwards_result_target_to_system_message(tmp_path, monkeypatch):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
@@ -270,6 +373,35 @@ async def test_send_message_forwards_result_target_to_system_message(tmp_path, m
         pass
 
     assert "/workspace/dem/ALL/2026-07-26_x/result/kirik" in captured["system_message"]
+
+
+@pytest.mark.asyncio
+async def test_send_message_includes_agents_md_content_when_present(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    host_project_path = tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_x"
+    host_project_path.mkdir(parents=True)
+    (host_project_path / "AGENTS.md").write_text("# Мои личные правила\nВсегда пиши по-русски.", encoding="utf-8")
+    storage.create_chat_session(conn, "chat1", "dem", str(host_project_path), "web_x", created_at=1.0)
+
+    async def fake_ensure_ownership(project_root):
+        pass
+
+    monkeypatch.setattr(quickchat.permissions, "ensure_ownership", fake_ensure_ownership)
+
+    captured = {}
+
+    async def fake_stream_chat(http_session, base_url, api_key, hermes_session_id, message, system_message=None):
+        captured["system_message"] = system_message
+        yield "done", {}
+
+    monkeypatch.setattr(quickchat.hermes_client, "stream_chat", fake_stream_chat)
+
+    async for _ in quickchat.send_message(conn, http_session=None, config=config, chat_session_id="chat1", text="привет"):
+        pass
+
+    assert "Мои личные правила" in captured["system_message"]
+    assert "Всегда пиши по-русски." in captured["system_message"]
 
 
 @pytest.mark.asyncio
@@ -352,6 +484,52 @@ async def test_get_or_open_session_reuses_existing_session(tmp_path, monkeypatch
 
     assert result["chat_session_id"] == "chat1"
     assert result["hermes_session_id"] == "web_existing"
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_backfills_missing_agents_and_history_md(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+    # AGENTS.md/history.md намеренно отсутствуют — проект "созданный до этой фичи".
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert os.path.isfile(project_dir / "AGENTS.md")
+    assert os.path.isfile(project_dir / "history.md")
+    assert "append-only" in (project_dir / "history.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_does_not_overwrite_existing_agents_md(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+    (project_dir / "AGENTS.md").write_text("# Мои личные правила проекта\n", encoding="utf-8")
+    (project_dir / "history.md").write_text("# Моя личная история проекта\n", encoding="utf-8")
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert (project_dir / "AGENTS.md").read_text(encoding="utf-8") == "# Мои личные правила проекта\n"
+    assert (project_dir / "history.md").read_text(encoding="utf-8") == "# Моя личная история проекта\n"
 
 
 @pytest.mark.asyncio

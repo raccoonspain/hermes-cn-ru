@@ -63,6 +63,48 @@ status: active
 # На чём остановились
 """
 
+AGENTS_MD_TEMPLATE = """# Конвенции проекта
+
+Готовые файлы (решения, отчёты, сгенерированные документы) клади в
+подпапку result/ внутри этого проекта — оттуда их видно и можно скачать
+в веб-интерфейсе; произвольные файлы в корне проекта там не отображаются.
+Исходники — в source/, вспомогательные материалы (скачанное,
+промежуточное) — в outer/. Внутри каждой из трёх папок можно заводить
+подпапки.
+
+После записи файла — проверь ответ инструмента: если он сообщил об
+ошибке или отказе, файл не сохранён, не пиши пользователю, что всё
+готово.
+
+Веди history.md в корне проекта — после каждого содержательного хода
+коротко фиксируй, что сделано и что дальше, новую запись добавляй строго
+снизу (append-only), не переписывая и не удаляя предыдущие. Держи размер
+разумным — ориентировочно не больше ~200 записей; если файл сильно
+разрастается, обобщи или сократи самые старые записи, не теряя ключевых
+решений.
+
+Это базовые конвенции проекта, общие для всех проектов на этой
+платформе. Можешь дополнять этот файл своими, специфичными для этого
+конкретного проекта, если пользователь просит что-то запомнить именно
+для него.
+"""
+
+HISTORY_MD_TEMPLATE = """# История хода проекта
+
+<!-- append-only: новые записи добавляй строго снизу, старые не трогай -->
+"""
+
+
+def _backfill_root_files(project_root: str) -> None:
+    for name, template in (("AGENTS.md", AGENTS_MD_TEMPLATE), ("history.md", HISTORY_MD_TEMPLATE)):
+        path = os.path.join(project_root, name)
+        if not os.path.isfile(path):
+            try:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(template)
+            except OSError:
+                logger.warning("не удалось создать %s в %s", name, project_root, exc_info=True)
+
 
 def _project_index_kwargs(config: Config) -> dict:
     kwargs = {}
@@ -130,6 +172,7 @@ async def create_quick_chat(db_conn, http_session, config: Config, user: str) ->
     now_label = datetime.datetime.now().strftime("%H:%M")
     with open(os.path.join(project_abs_path, "about.md"), "w", encoding="utf-8") as fh:
         fh.write(ABOUT_MD_PLACEHOLDER.format(title=f"Новый разговор {now_label}"))
+    _backfill_root_files(project_abs_path)
 
     # project_index_core.index_update может дойти до реального HTTP-вызова
     # (эмбеддинг через wormsoft.ru, requests.post с таймаутом+ретраем — до
@@ -158,6 +201,7 @@ async def get_or_open_session(db_conn, http_session, config: Config, user: str, 
     # get_project_detail кидает ProjectIndexError, если about.md не найден —
     # значит это не проект, открывать нечего.
     project_index_core.get_project_detail(user, project_path, workspace_root=_workspace_root(config))
+    _backfill_root_files(resolved)
 
     existing = storage.get_chat_session_for_project(db_conn, user, resolved)
     if existing is not None:
@@ -173,23 +217,47 @@ async def get_or_open_session(db_conn, http_session, config: Config, user: str, 
     return {"chat_session_id": chat_session_id, "project_path": resolved, "hermes_session_id": hermes_session_id}
 
 
-def _system_message_for(project_path: str, result_target: str | None = None) -> str:
+AGENTS_MD_MAX_CHARS = 4000
+
+
+def _agents_md_block(project_path: str) -> str:
+    path = os.path.join(project_path, "AGENTS.md")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read(AGENTS_MD_MAX_CHARS + 1)
+    except FileNotFoundError:
+        return ""
+    except OSError:
+        logger.warning("не удалось прочитать AGENTS.md: %s", path, exc_info=True)
+        return ""
+    if not text.strip():
+        return ""
+    if len(text) > AGENTS_MD_MAX_CHARS:
+        text = text[:AGENTS_MD_MAX_CHARS] + "\n[...обрезано, полный текст в AGENTS.md]"
+    return f"\n\nКонвенции проекта (AGENTS.md):\n{text}"
+
+
+_STATIC_CONVENTIONS_FALLBACK = (
+    " Готовые файлы (решения, отчёты, сгенерированные документы) клади в "
+    "подпапку result/ внутри этого проекта — оттуда их видно и можно "
+    "скачать в веб-интерфейсе; произвольные файлы в корне проекта там не "
+    "отображаются. Исходники — в source/, вспомогательные материалы "
+    "(скачанное, промежуточное) — в outer/; внутри каждой из трёх можно "
+    "заводить подпапки. После записи файла — проверь ответ инструмента: "
+    "если он сообщил об ошибке или отказе, файл не сохранён, не пиши "
+    "пользователю, что всё готово."
+)
+
+
+def _system_message_for(project_path: str, result_target: str | None = None, agents_md_block: str = "") -> str:
     message = (
         f"Текущий проект: {project_path}. "
-        "Готовые файлы (решения, отчёты, сгенерированные документы) клади в "
-        "подпапку result/ внутри этого проекта — оттуда их видно и можно "
-        "скачать в веб-интерфейсе; произвольные папки в корне проекта там не "
-        "отображаются. Исходники — в source/, вспомогательные материалы "
-        "(скачанное, промежуточное) — в outer/; внутри каждой из трёх можно "
-        "заводить подпапки. "
         "Инструментам write_file/read_file передавай АБСОЛЮТНЫЙ путь, "
         f"начинающийся строго с {project_path} (например "
         f"{project_path}/result/solution.md). Путь без этого префикса "
         "резолвится не от корня текущего проекта, а от другого каталога "
         "сессии, и почти всегда попадает мимо проекта или получает отказ в "
-        "записи. После записи файла — проверь ответ инструмента: если он "
-        "сообщил об ошибке или отказе, файл не сохранён, не пиши "
-        "пользователю, что всё готово."
+        "записи."
     )
     if result_target and _is_valid_result_target(result_target):
         message += (
@@ -199,6 +267,10 @@ def _system_message_for(project_path: str, result_target: str | None = None) -> 
             "хода — спроси пользователя перед сохранением, а не сохраняй молча "
             "в другое место."
         )
+    if agents_md_block:
+        message += agents_md_block
+    else:
+        message += _STATIC_CONVENTIONS_FALLBACK
     return message
 
 
@@ -223,7 +295,11 @@ async def send_message(
         config.hermes_api_key,
         row["hermes_session_id"],
         text,
-        system_message=_system_message_for(_sandbox_project_path(config, row["project_path"]), result_target),
+        system_message=_system_message_for(
+            _sandbox_project_path(config, row["project_path"]),
+            result_target,
+            agents_md_block=_agents_md_block(row["project_path"]),
+        ),
     ):
         yield name, payload
 
