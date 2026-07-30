@@ -380,6 +380,50 @@ async def test_get_or_open_session_reuses_existing_session(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_get_or_open_session_backfills_missing_agents_and_history_md(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+    # AGENTS.md/history.md намеренно отсутствуют — проект "созданный до этой фичи".
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert os.path.isfile(project_dir / "AGENTS.md")
+    assert os.path.isfile(project_dir / "history.md")
+    assert "append-only" in (project_dir / "history.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_does_not_overwrite_existing_agents_md(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+    (project_dir / "AGENTS.md").write_text("# Мои личные правила проекта\n", encoding="utf-8")
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert (project_dir / "AGENTS.md").read_text(encoding="utf-8") == "# Мои личные правила проекта\n"
+
+
+@pytest.mark.asyncio
 async def test_get_or_open_session_unknown_project_raises(tmp_path):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)

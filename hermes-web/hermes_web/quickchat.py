@@ -198,6 +198,7 @@ async def get_or_open_session(db_conn, http_session, config: Config, user: str, 
     # get_project_detail кидает ProjectIndexError, если about.md не найден —
     # значит это не проект, открывать нечего.
     project_index_core.get_project_detail(user, project_path, workspace_root=_workspace_root(config))
+    _backfill_root_files(resolved)
 
     existing = storage.get_chat_session_for_project(db_conn, user, resolved)
     if existing is not None:
