@@ -284,7 +284,11 @@ async def send_message(
         config.hermes_api_key,
         row["hermes_session_id"],
         text,
-        system_message=_system_message_for(_sandbox_project_path(config, row["project_path"]), result_target),
+        system_message=_system_message_for(
+            _sandbox_project_path(config, row["project_path"]),
+            result_target,
+            agents_md_block=_agents_md_block(row["project_path"]),
+        ),
     ):
         yield name, payload
 

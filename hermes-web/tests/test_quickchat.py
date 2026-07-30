@@ -355,6 +355,35 @@ async def test_send_message_forwards_result_target_to_system_message(tmp_path, m
 
 
 @pytest.mark.asyncio
+async def test_send_message_includes_agents_md_content_when_present(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    host_project_path = tmp_path / "workspace" / "dem" / "ALL" / "2026-07-26_x"
+    host_project_path.mkdir(parents=True)
+    (host_project_path / "AGENTS.md").write_text("# Мои личные правила\nВсегда пиши по-русски.", encoding="utf-8")
+    storage.create_chat_session(conn, "chat1", "dem", str(host_project_path), "web_x", created_at=1.0)
+
+    async def fake_ensure_ownership(project_root):
+        pass
+
+    monkeypatch.setattr(quickchat.permissions, "ensure_ownership", fake_ensure_ownership)
+
+    captured = {}
+
+    async def fake_stream_chat(http_session, base_url, api_key, hermes_session_id, message, system_message=None):
+        captured["system_message"] = system_message
+        yield "done", {}
+
+    monkeypatch.setattr(quickchat.hermes_client, "stream_chat", fake_stream_chat)
+
+    async for _ in quickchat.send_message(conn, http_session=None, config=config, chat_session_id="chat1", text="привет"):
+        pass
+
+    assert "Мои личные правила" in captured["system_message"]
+    assert "Всегда пиши по-русски." in captured["system_message"]
+
+
+@pytest.mark.asyncio
 async def test_send_message_unknown_chat_session_raises(tmp_path):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)
