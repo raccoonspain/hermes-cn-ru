@@ -312,6 +312,25 @@ def test_system_message_without_result_target_unchanged():
     assert "спроси пользователя" not in msg
 
 
+def test_system_message_appends_agents_md_block_when_provided():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x", agents_md_block="\n\nКонвенции проекта (AGENTS.md):\nМои правила")
+    assert "Конвенции проекта (AGENTS.md):" in msg
+    assert "Мои правила" in msg
+
+
+def test_system_message_agents_md_block_defaults_to_empty():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x")
+    assert "Конвенции проекта (AGENTS.md):" not in msg
+
+
+def test_system_message_agents_md_block_comes_after_result_target_hint():
+    msg = quickchat._system_message_for(
+        "/workspace/dem/ALL/x", result_target="result/kirik",
+        agents_md_block="\n\nКонвенции проекта (AGENTS.md):\nМои правила",
+    )
+    assert msg.index("спроси пользователя") < msg.index("Конвенции проекта (AGENTS.md):")
+
+
 @pytest.mark.asyncio
 async def test_send_message_forwards_result_target_to_system_message(tmp_path, monkeypatch):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))

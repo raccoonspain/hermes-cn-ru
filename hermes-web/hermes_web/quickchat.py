@@ -232,7 +232,7 @@ def _agents_md_block(project_path: str) -> str:
     return f"\n\nКонвенции проекта (AGENTS.md):\n{text}"
 
 
-def _system_message_for(project_path: str, result_target: str | None = None) -> str:
+def _system_message_for(project_path: str, result_target: str | None = None, agents_md_block: str = "") -> str:
     message = (
         f"Текущий проект: {project_path}. "
         "Готовые файлы (решения, отчёты, сгенерированные документы) клади в "
@@ -258,6 +258,8 @@ def _system_message_for(project_path: str, result_target: str | None = None) -> 
             "хода — спроси пользователя перед сохранением, а не сохраняй молча "
             "в другое место."
         )
+    if agents_md_block:
+        message += agents_md_block
     return message
 
 
