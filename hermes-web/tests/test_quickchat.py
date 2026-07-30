@@ -222,6 +222,44 @@ def test_sandbox_project_path_leaves_non_matching_path_untouched(tmp_path):
     assert quickchat._sandbox_project_path(config, "/some/other/path") == "/some/other/path"
 
 
+def test_agents_md_block_returns_empty_when_file_missing(tmp_path):
+    assert quickchat._agents_md_block(str(tmp_path / "nope")) == ""
+
+
+def test_agents_md_block_returns_content_when_present(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").write_text("# Мои правила\nПишем тесты.", encoding="utf-8")
+
+    block = quickchat._agents_md_block(str(project_dir))
+
+    assert "Конвенции проекта (AGENTS.md):" in block
+    assert "Мои правила" in block
+
+
+def test_agents_md_block_truncates_when_too_long(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").write_text("x" * (quickchat.AGENTS_MD_MAX_CHARS + 1000), encoding="utf-8")
+
+    block = quickchat._agents_md_block(str(project_dir))
+
+    assert "[...обрезано, полный текст в AGENTS.md]" in block
+    assert len(block) < quickchat.AGENTS_MD_MAX_CHARS + 1000
+
+
+def test_agents_md_block_logs_and_returns_empty_on_read_error(tmp_path, caplog):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").mkdir()  # директория вместо файла → open() кидает OSError
+
+    with caplog.at_level("WARNING", logger="hermes_web.quickchat"):
+        block = quickchat._agents_md_block(str(project_dir))
+
+    assert block == ""
+    assert "AGENTS.md" in caplog.text
+
+
 def test_system_message_requires_absolute_sandbox_path():
     msg = quickchat._system_message_for("/workspace/dem/ALL/2026-07-26_x")
     assert "write_file" in msg or "read_file" in msg

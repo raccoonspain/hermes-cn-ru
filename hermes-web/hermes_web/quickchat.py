@@ -214,6 +214,24 @@ async def get_or_open_session(db_conn, http_session, config: Config, user: str, 
     return {"chat_session_id": chat_session_id, "project_path": resolved, "hermes_session_id": hermes_session_id}
 
 
+AGENTS_MD_MAX_CHARS = 4000
+
+
+def _agents_md_block(project_path: str) -> str:
+    path = os.path.join(project_path, "AGENTS.md")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        return ""
+    except OSError:
+        logger.warning("не удалось прочитать AGENTS.md: %s", path, exc_info=True)
+        return ""
+    if len(text) > AGENTS_MD_MAX_CHARS:
+        text = text[:AGENTS_MD_MAX_CHARS] + "\n[...обрезано, полный текст в AGENTS.md]"
+    return f"\n\nКонвенции проекта (AGENTS.md):\n{text}"
+
+
 def _system_message_for(project_path: str, result_target: str | None = None) -> str:
     message = (
         f"Текущий проект: {project_path}. "
