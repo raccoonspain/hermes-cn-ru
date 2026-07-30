@@ -63,6 +63,45 @@ status: active
 # На чём остановились
 """
 
+AGENTS_MD_TEMPLATE = """# Конвенции проекта
+
+Готовые файлы (решения, отчёты, сгенерированные документы) клади в
+подпапку result/ внутри этого проекта — оттуда их видно и можно скачать
+в веб-интерфейсе; произвольные файлы в корне проекта там не отображаются.
+Исходники — в source/, вспомогательные материалы (скачанное,
+промежуточное) — в outer/. Внутри каждой из трёх папок можно заводить
+подпапки.
+
+После записи файла — проверь ответ инструмента: если он сообщил об
+ошибке или отказе, файл не сохранён, не пиши пользователю, что всё
+готово.
+
+Веди history.md в корне проекта — после каждого содержательного хода
+коротко фиксируй, что сделано и что дальше, новую запись добавляй строго
+снизу (append-only), не переписывая и не удаляя предыдущие. Держи размер
+разумным — ориентировочно не больше ~200 записей; если файл сильно
+разрастается, обобщи или сократи самые старые записи, не теряя ключевых
+решений.
+
+Это базовые конвенции проекта, общие для всех проектов на этой
+платформе. Можешь дополнять этот файл своими, специфичными для этого
+конкретного проекта, если пользователь просит что-то запомнить именно
+для него.
+"""
+
+HISTORY_MD_TEMPLATE = """# История хода проекта
+
+<!-- append-only: новые записи добавляй строго снизу, старые не трогай -->
+"""
+
+
+def _backfill_root_files(project_root: str) -> None:
+    for name, template in (("AGENTS.md", AGENTS_MD_TEMPLATE), ("history.md", HISTORY_MD_TEMPLATE)):
+        path = os.path.join(project_root, name)
+        if not os.path.isfile(path):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(template)
+
 
 def _project_index_kwargs(config: Config) -> dict:
     kwargs = {}
@@ -130,6 +169,7 @@ async def create_quick_chat(db_conn, http_session, config: Config, user: str) ->
     now_label = datetime.datetime.now().strftime("%H:%M")
     with open(os.path.join(project_abs_path, "about.md"), "w", encoding="utf-8") as fh:
         fh.write(ABOUT_MD_PLACEHOLDER.format(title=f"Новый разговор {now_label}"))
+    _backfill_root_files(project_abs_path)
 
     # project_index_core.index_update может дойти до реального HTTP-вызова
     # (эмбеддинг через wormsoft.ru, requests.post с таймаутом+ретраем — до

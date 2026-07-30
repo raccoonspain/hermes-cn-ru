@@ -124,6 +124,31 @@ async def test_create_quick_chat_runs_index_update_without_blocking_event_loop(t
 
 
 @pytest.mark.asyncio
+async def test_create_quick_chat_creates_agents_and_history_md(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    result = await quickchat.create_quick_chat(conn, http_session=None, config=config, user="dem")
+
+    agents_path = os.path.join(result["project_path"], "AGENTS.md")
+    history_path = os.path.join(result["project_path"], "history.md")
+    assert os.path.isfile(agents_path)
+    assert os.path.isfile(history_path)
+
+    agents_text = open(agents_path, encoding="utf-8").read()
+    assert "result/" in agents_text
+    assert "history.md" in agents_text
+
+    history_text = open(history_path, encoding="utf-8").read()
+    assert "append-only" in history_text
+
+
+@pytest.mark.asyncio
 async def test_send_message_forwards_project_path_as_system_message(tmp_path, monkeypatch):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)
