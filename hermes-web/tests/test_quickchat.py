@@ -248,6 +248,13 @@ def test_agents_md_block_truncates_when_too_long(tmp_path):
     assert len(block) < quickchat.AGENTS_MD_MAX_CHARS + 1000
 
 
+def test_agents_md_block_returns_empty_for_blank_file(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").write_text("   \n\n  ", encoding="utf-8")
+    assert quickchat._agents_md_block(str(project_dir)) == ""
+
+
 def test_agents_md_block_logs_and_returns_empty_on_read_error(tmp_path, caplog):
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
@@ -321,6 +328,20 @@ def test_system_message_appends_agents_md_block_when_provided():
 def test_system_message_agents_md_block_defaults_to_empty():
     msg = quickchat._system_message_for("/workspace/dem/ALL/x")
     assert "Конвенции проекта (AGENTS.md):" not in msg
+
+
+def test_system_message_uses_fallback_conventions_when_agents_md_block_empty():
+    msg = quickchat._system_message_for("/workspace/dem/ALL/x")
+    assert "подпапку result/" in msg
+    assert "проверь ответ инструмента" in msg
+
+
+def test_system_message_does_not_duplicate_conventions_when_agents_md_block_present():
+    msg = quickchat._system_message_for(
+        "/workspace/dem/ALL/x", agents_md_block="\n\nКонвенции проекта (AGENTS.md):\nМои правила",
+    )
+    assert msg.count("подпапку result/") == 0  # fallback text absent — только то, что принёс agents_md_block
+    assert msg.count("Мои правила") == 1
 
 
 def test_system_message_agents_md_block_comes_after_result_target_hint():
@@ -498,6 +519,7 @@ async def test_get_or_open_session_does_not_overwrite_existing_agents_md(tmp_pat
         "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
     )
     (project_dir / "AGENTS.md").write_text("# Мои личные правила проекта\n", encoding="utf-8")
+    (project_dir / "history.md").write_text("# Моя личная история проекта\n", encoding="utf-8")
 
     async def fake_create_session(http_session, base_url, api_key, session_id):
         return {"session": {"id": session_id}}
@@ -507,6 +529,7 @@ async def test_get_or_open_session_does_not_overwrite_existing_agents_md(tmp_pat
     await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
 
     assert (project_dir / "AGENTS.md").read_text(encoding="utf-8") == "# Мои личные правила проекта\n"
+    assert (project_dir / "history.md").read_text(encoding="utf-8") == "# Моя личная история проекта\n"
 
 
 @pytest.mark.asyncio

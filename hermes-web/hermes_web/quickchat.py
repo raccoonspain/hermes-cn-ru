@@ -99,8 +99,11 @@ def _backfill_root_files(project_root: str) -> None:
     for name, template in (("AGENTS.md", AGENTS_MD_TEMPLATE), ("history.md", HISTORY_MD_TEMPLATE)):
         path = os.path.join(project_root, name)
         if not os.path.isfile(path):
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(template)
+            try:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(template)
+            except OSError:
+                logger.warning("не удалось создать %s в %s", name, project_root, exc_info=True)
 
 
 def _project_index_kwargs(config: Config) -> dict:
@@ -221,34 +224,40 @@ def _agents_md_block(project_path: str) -> str:
     path = os.path.join(project_path, "AGENTS.md")
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
+            text = fh.read(AGENTS_MD_MAX_CHARS + 1)
     except FileNotFoundError:
         return ""
     except OSError:
         logger.warning("не удалось прочитать AGENTS.md: %s", path, exc_info=True)
+        return ""
+    if not text.strip():
         return ""
     if len(text) > AGENTS_MD_MAX_CHARS:
         text = text[:AGENTS_MD_MAX_CHARS] + "\n[...обрезано, полный текст в AGENTS.md]"
     return f"\n\nКонвенции проекта (AGENTS.md):\n{text}"
 
 
+_STATIC_CONVENTIONS_FALLBACK = (
+    " Готовые файлы (решения, отчёты, сгенерированные документы) клади в "
+    "подпапку result/ внутри этого проекта — оттуда их видно и можно "
+    "скачать в веб-интерфейсе; произвольные файлы в корне проекта там не "
+    "отображаются. Исходники — в source/, вспомогательные материалы "
+    "(скачанное, промежуточное) — в outer/; внутри каждой из трёх можно "
+    "заводить подпапки. После записи файла — проверь ответ инструмента: "
+    "если он сообщил об ошибке или отказе, файл не сохранён, не пиши "
+    "пользователю, что всё готово."
+)
+
+
 def _system_message_for(project_path: str, result_target: str | None = None, agents_md_block: str = "") -> str:
     message = (
         f"Текущий проект: {project_path}. "
-        "Готовые файлы (решения, отчёты, сгенерированные документы) клади в "
-        "подпапку result/ внутри этого проекта — оттуда их видно и можно "
-        "скачать в веб-интерфейсе; произвольные папки в корне проекта там не "
-        "отображаются. Исходники — в source/, вспомогательные материалы "
-        "(скачанное, промежуточное) — в outer/; внутри каждой из трёх можно "
-        "заводить подпапки. "
         "Инструментам write_file/read_file передавай АБСОЛЮТНЫЙ путь, "
         f"начинающийся строго с {project_path} (например "
         f"{project_path}/result/solution.md). Путь без этого префикса "
         "резолвится не от корня текущего проекта, а от другого каталога "
         "сессии, и почти всегда попадает мимо проекта или получает отказ в "
-        "записи. После записи файла — проверь ответ инструмента: если он "
-        "сообщил об ошибке или отказе, файл не сохранён, не пиши "
-        "пользователю, что всё готово."
+        "записи."
     )
     if result_target and _is_valid_result_target(result_target):
         message += (
@@ -260,6 +269,8 @@ def _system_message_for(project_path: str, result_target: str | None = None, age
         )
     if agents_md_block:
         message += agents_md_block
+    else:
+        message += _STATIC_CONVENTIONS_FALLBACK
     return message
 
 
