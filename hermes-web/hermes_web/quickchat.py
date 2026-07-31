@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
-from . import hermes_client, permissions, storage
+from . import hermes_client, permissions, storage, workspace
 
 _PROJECT_INDEX_DIR = os.environ.get("PROJECT_INDEX_PLUGIN_DIR")
 if _PROJECT_INDEX_DIR and _PROJECT_INDEX_DIR not in sys.path:
@@ -95,7 +95,7 @@ HISTORY_MD_TEMPLATE = """# История хода проекта
 """
 
 
-def _backfill_root_files(project_root: str) -> None:
+def _backfill_project_scaffold(project_root: str) -> None:
     for name, template in (("AGENTS.md", AGENTS_MD_TEMPLATE), ("history.md", HISTORY_MD_TEMPLATE)):
         path = os.path.join(project_root, name)
         if not os.path.isfile(path):
@@ -104,6 +104,12 @@ def _backfill_root_files(project_root: str) -> None:
                     fh.write(template)
             except OSError:
                 logger.warning("не удалось создать %s в %s", name, project_root, exc_info=True)
+    for bucket in workspace.BUCKETS:
+        path = os.path.join(project_root, bucket)
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError:
+            logger.warning("не удалось создать папку %s в %s", bucket, project_root, exc_info=True)
 
 
 def _project_index_kwargs(config: Config) -> dict:
@@ -172,7 +178,7 @@ async def create_quick_chat(db_conn, http_session, config: Config, user: str) ->
     now_label = datetime.datetime.now().strftime("%H:%M")
     with open(os.path.join(project_abs_path, "about.md"), "w", encoding="utf-8") as fh:
         fh.write(ABOUT_MD_PLACEHOLDER.format(title=f"Новый разговор {now_label}"))
-    _backfill_root_files(project_abs_path)
+    _backfill_project_scaffold(project_abs_path)
 
     # project_index_core.index_update может дойти до реального HTTP-вызова
     # (эмбеддинг через wormsoft.ru, requests.post с таймаутом+ретраем — до
@@ -201,7 +207,7 @@ async def get_or_open_session(db_conn, http_session, config: Config, user: str, 
     # get_project_detail кидает ProjectIndexError, если about.md не найден —
     # значит это не проект, открывать нечего.
     project_index_core.get_project_detail(user, project_path, workspace_root=_workspace_root(config))
-    _backfill_root_files(resolved)
+    _backfill_project_scaffold(resolved)
 
     existing = storage.get_chat_session_for_project(db_conn, user, resolved)
     if existing is not None:
