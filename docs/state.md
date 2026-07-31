@@ -104,6 +104,72 @@ provider» (это wormsoft.ru временно тормозит, не наш б
 
 ## Сейчас в работе
 
+**🔄 ТОЧКА ВОЗОБНОВЛЕНИЯ (пауза по просьбе пользователя, 2026-07-31,
+поздний вечер) — продолжить отсюда:**
+
+Группа B бэклога живого тестирования закрыта целиком (B1 задеплоен и
+подтверждён вживую). Следующий шаг по согласованному порядку B → A → C
+→ D — **Группа A** (удаление проекта → создание проекта из списка →
+редактирование тегов). Дизайн-спек написан и лежит в
+[superpowers/specs/2026-07-31-project-crud-hygiene-design.md](./superpowers/specs/2026-07-31-project-crud-hygiene-design.md) —
+все технические решения зафиксированы, включая оба открытых вопроса,
+которые пользователь уже решил (2026-07-31): **A1 — мягкое удаление**
+(перенос в скрытую `.trash/` папку пользователя, восстановление вручную
+по SSH, без отдельного UI/API восстановления в этом срезе); **A3 — с
+автокомплитом** по уже известным пользователю тегам.
+
+**Что уже спроектировано (в спеке, код ещё не написан):**
+- A1: `project_index_core.delete_project` (новая, по образцу `move_project`,
+  требует `import uuid`) + `storage.delete_project` (уже существует,
+  просто не вызывался) + `hermes_web.projects.delete_project` (async-обёртка)
+  + `POST /api/projects/delete` + `list_groups` учится игнорировать
+  скрытые директории (`.trash` не должен быть виден как группа) + кнопка
+  «Удалить проект» в `project-selector.html` с `confirm()`.
+- A2: `quickchat.create_project(db_conn, config, user, group, title)` —
+  без подъёма Hermes-сессии (лениво через уже существующий
+  `get_or_open_session`), переиспользует `_backfill_project_scaffold`
+  (B1) и `projects.slugify` (не заводит второй slugify) + `POST /api/projects`
+  + кнопка «+ новый проект» в `project-selector.html` (`prompt()` для
+  названия, `state.group` как целевая группа, редирект в
+  `project-workspace.html` после создания).
+- A3: `project_index_core._rewrite_frontmatter` (узкий позиционный патч
+  YAML-блока `about.md`, тот же принцип, что `_rewrite_title` — не
+  пересборка всего файла) + `update_project_metadata` (переиспользует
+  `index_update` для пересчёта эмбеддинга и `get_project_detail` для
+  формата ответа) + `hermes_web.projects.update_project_metadata` +
+  `POST /api/projects/metadata` + редактируемые чипы тегов в
+  `project-selector.html` (автокомплит через `<datalist>` из уже
+  загруженного в память списка проектов, без нового эндпоинта).
+
+**Важное отличие деплоя от B1** (уже задокументировано в спеке, раздел
+«Деплой»): меняются файлы в ДВУХ разных пакетах —
+`hermes-plugins/project_index/core.py` (Hermes-плагин, на сервере в
+`~/.hermes/plugins/project_index/`, общий для `hermes-web` и самого
+Hermes-агента) требует рестарта **обоих** сервисов
+(`hermes-web.service` **и** `hermes-gateway.service`), не только
+`hermes_web/*.py` (только `hermes-web.service`, как в B1).
+
+**Следующее конкретное действие:** `writing-plans` по спеку
+`2026-07-31-project-crud-hygiene-design.md` — план из 6 задач (A1
+бэкенд/фронтенд, A2 бэкенд/фронтенд, A3 бэкенд/фронтенд), затем
+`subagent-driven-development` в изолированном worktree, как и для B1.
+Перед стартом реализации проверить, что тестовый venv ещё жив:
+`/tmp/claude-1000/-home-deploy-hermes-cn-ru/333f04b6-c842-486b-85fa-2a0095a11d44/scratchpad/hermes-web-venv`
+(если сессия/scratchpad сброшены — пересоздать по образцу плана
+2026-07-26, см. «Главные подводные камни» ниже). Уже проверено при
+исследовании перед паузой: `hermes-plugins/tests/` — 64 теста зелёные
+этим же venv (`cd hermes-plugins && .../python3 -m pytest tests/ -q`),
+`hermes-web/tests/` — 219 зелёные. Существующие паттерны тестов для
+опоры: `hermes-plugins/tests/test_core.py` (`_write_project` хелпер,
+тесты `move_project` — прямой образец для тестов `delete_project`/
+`update_project_metadata`), `hermes-web/tests/test_projects.py`
+(`_write_project`/`_config` хелперы, `test_move_project_runs_in_executor`/
+`test_move_project_updates_chat_session_path` — образец для обёрток),
+`hermes-web/tests/test_app.py` (`test_move_project_success` и соседние —
+образец для HTTP-эндпоинт-тестов новых роутов).
+
+---
+
 **D-015 (пакет стартовых файлов проекта about.md+AGENTS.md+history.md +
 подхват AGENTS.md в системное сообщение) — реализовано, задеплоено на
 VPS и подтверждено живьём (2026-07-31). Готово целиком.** Закрывает
