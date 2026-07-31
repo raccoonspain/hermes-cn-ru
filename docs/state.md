@@ -162,9 +162,11 @@ D-015 пользователь прогнал `hermes.blackboxbegin.space` жи�
   (`create_quick_chat`), но не папки `source/outer/result` — нужно
   расширить `_backfill_root_files`. **B2 (видимость корневых файлов в
   дереве) подтверждена пользователем как уже закрытая текущим UI — работы
-  не требует.** B1 (папки) — **спек написан**
-  ([2026-07-31-project-scaffold-folders-design.md](./superpowers/specs/2026-07-31-project-scaffold-folders-design.md)),
-  реализация ещё не начата — следующий шаг.
+  не требует.** B1 (папки) — спек
+  ([2026-07-31-project-scaffold-folders-design.md](./superpowers/specs/2026-07-31-project-scaffold-folders-design.md))
+  и план
+  ([2026-07-31-project-scaffold-folders.md](./superpowers/plans/2026-07-31-project-scaffold-folders.md),
+  2 задачи, TDD) написаны — реализация ещё не начата, следующий шаг.
 - **Группа A** (CRUD-гигиена, независимые бэкенд+UI задачи): удаления
   проекта нет вообще ни в коде, ни в UI (2 тестовых «мусорных» проекта
   реально нечем убрать); создания проекта из `project-selector.html` с
