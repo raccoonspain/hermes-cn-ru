@@ -548,6 +548,59 @@ async def test_get_or_open_session_backfills_missing_bucket_folders(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_get_or_open_session_does_not_touch_existing_bucket_contents(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "notes.txt").write_text("не трогать", encoding="utf-8")
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert (project_dir / "source" / "notes.txt").read_text(encoding="utf-8") == "не трогать"
+    assert os.path.isdir(project_dir / "outer")
+    assert os.path.isdir(project_dir / "result")
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_logs_and_continues_when_bucket_path_is_a_file(tmp_path, monkeypatch, caplog):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = tmp_path / "workspace" / "dem" / "ALL" / "a"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text(
+        "---\ntags: []\nstatus: active\n---\n\n# Название проекта\nТест\n\n# Краткое описание\nОписание\n", encoding="utf-8",
+    )
+    # "source" занят файлом, а не папкой — os.makedirs(..., exist_ok=True)
+    # в этом случае бросает FileExistsError (подкласс OSError).
+    (project_dir / "source").write_text("не папка", encoding="utf-8")
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    with caplog.at_level("WARNING", logger="hermes_web.quickchat"):
+        await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path="dem/ALL/a")
+
+    assert "source" in caplog.text
+    # Остальные два бакета создались несмотря на ошибку первого.
+    assert os.path.isdir(project_dir / "outer")
+    assert os.path.isdir(project_dir / "result")
+    # Файл "source" остался нетронутым, а не превратился в директорию силой.
+    assert (project_dir / "source").is_file()
+
+
+@pytest.mark.asyncio
 async def test_get_or_open_session_does_not_overwrite_existing_agents_md(tmp_path, monkeypatch):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)
