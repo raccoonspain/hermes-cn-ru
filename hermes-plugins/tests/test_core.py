@@ -286,6 +286,19 @@ def test_reindex_all_missing_user_dir_raises(tmp_path):
         core.reindex_all("nobody", workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"))
 
 
+def test_reindex_all_does_not_resurrect_trashed_projects(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/proj")
+    db_path = str(tmp_path / "index.db")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: [0.1])
+
+    deleted = core.delete_project("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+
+    result = core.reindex_all("dem", workspace_root=str(tmp_path), db_path=db_path)
+
+    assert deleted["trashed_path"] not in result["indexed"]
+    assert not any(p.startswith(str(tmp_path / "dem" / ".trash")) for p in result["indexed"])
+
+
 def test_parse_about_md_extracts_points_and_now():
     result = core.parse_about_md(ABOUT_MD_FULL)
     assert result["points"] == "- начали с чистого листа"
@@ -500,6 +513,34 @@ def test_rewrite_frontmatter_missing_frontmatter_raises(tmp_path):
     (project_dir / "about.md").write_text("# Название проекта\nX\n", encoding="utf-8")
     with pytest.raises(core.ProjectIndexError):
         core._rewrite_frontmatter(str(project_dir), tags=["x"])
+
+
+ABOUT_MD_WITH_EXTRA_KEY = """---
+priority: high
+tags: [excel, работа]
+status: active
+---
+
+# Название проекта
+Тест
+
+# Краткое описание
+Описание
+"""
+
+
+def test_rewrite_frontmatter_preserves_key_insertion_order(tmp_path):
+    project_dir = _write_project(tmp_path, "dem/ALL/proj", about_content=ABOUT_MD_WITH_EXTRA_KEY)
+    core._rewrite_frontmatter(str(project_dir), status="archived")
+
+    about_path = project_dir / "about.md"
+    text = about_path.read_text(encoding="utf-8")
+    frontmatter_text = text.split("---", 2)[1]
+
+    priority_pos = frontmatter_text.index("priority")
+    tags_pos = frontmatter_text.index("tags")
+    status_pos = frontmatter_text.index("status")
+    assert priority_pos < tags_pos < status_pos
 
 
 def test_update_project_metadata_updates_tags_and_reindexes(tmp_path, monkeypatch):

@@ -1088,3 +1088,27 @@ async def test_update_project_metadata_not_found_returns_400(aiohttp_client, app
     await client.post("/login", json={"username": "dem", "password": "secret123"})
     resp = await client.post("/api/projects/metadata", json={"path": "dem/ALL/x", "tags": []})
     assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_update_project_metadata_non_list_tags_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_update_project_metadata(user, path, config, tags=None, status=None):
+        raise AssertionError("update_project_metadata не должен вызываться при невалидных tags")
+
+    monkeypatch.setattr("hermes_web.app.projects.update_project_metadata", fake_update_project_metadata)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/metadata", json={"path": "dem/ALL/a", "tags": "физика"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_update_project_metadata_invalid_status_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_update_project_metadata(user, path, config, tags=None, status=None):
+        raise AssertionError("update_project_metadata не должен вызываться при невалидном status")
+
+    monkeypatch.setattr("hermes_web.app.projects.update_project_metadata", fake_update_project_metadata)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/metadata", json={"path": "dem/ALL/a", "status": "ЛЮБАЯ СТРОКА"})
+    assert resp.status == 400

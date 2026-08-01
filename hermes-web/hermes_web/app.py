@@ -309,6 +309,10 @@ async def handle_update_project_metadata(request: web.Request) -> web.Response:
     path = str(body.get("path", ""))
     tags = body.get("tags")
     status = body.get("status")
+    if tags is not None and (not isinstance(tags, list) or not all(isinstance(t, str) for t in tags)):
+        return web.json_response({"error": "tags должен быть списком строк"}, status=400)
+    if status is not None and status not in ("active", "archived"):
+        return web.json_response({"error": "status должен быть 'active' или 'archived'"}, status=400)
     try:
         result = await projects.update_project_metadata(user["username"], path, request.app["quickchat_config"], tags=tags, status=status)
     except projects.project_index_core.ProjectIndexError as exc:

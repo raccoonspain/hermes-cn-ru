@@ -330,7 +330,7 @@ def _rewrite_frontmatter(project_dir: str, tags: list | None = None, status: str
     if status is not None:
         frontmatter["status"] = status
 
-    new_frontmatter_text = yaml.safe_dump(frontmatter, allow_unicode=True, default_flow_style=False)
+    new_frontmatter_text = yaml.safe_dump(frontmatter, allow_unicode=True, default_flow_style=False, sort_keys=False)
     updated = f"---\n{new_frontmatter_text}---{parts[2]}"
     with open(about_path, "w", encoding="utf-8") as fh:
         fh.write(updated)
@@ -366,7 +366,8 @@ def reindex_all(
 
     indexed = []
     failed = []
-    for dirpath, _dirnames, filenames in os.walk(user_root):
+    for dirpath, dirnames, filenames in os.walk(user_root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         if "about.md" not in filenames:
             continue
         rel_path = os.path.relpath(dirpath, os.path.realpath(workspace_root))

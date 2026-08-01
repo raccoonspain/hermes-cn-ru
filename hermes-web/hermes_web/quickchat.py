@@ -116,6 +116,8 @@ async def create_project(db_conn, config: Config, user: str, group: str, title: 
     title = title.strip()
     if not title:
         raise QuickChatError("название проекта не может быть пустым")
+    if not group or group.startswith(".") or "/" in group:
+        raise QuickChatError(f"недопустимое имя группы: '{group}'")
 
     if group == "ALL":
         today = datetime.date.today().isoformat()

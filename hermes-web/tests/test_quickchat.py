@@ -798,3 +798,33 @@ async def test_create_project_group_traversal_raises_and_does_not_touch_disk(tmp
         await quickchat.create_project(conn, config, "dem", "../rost", "Угнанный проект")
 
     assert list((tmp_path / "workspace" / "rost").iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_create_project_rejects_hidden_group(tmp_path):
+    """group='.trash' не эскейпит пространство пользователя (resolve_project_path
+    его пропускает), но создаёт проект в скрытой служебной папке — видимый в
+    «везде»-поиске и невидимый в сайдбаре (list_groups прячет dot-папки)."""
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    with pytest.raises(quickchat.QuickChatError):
+        await quickchat.create_project(conn, config, "dem", ".trash", "Скрытый проект")
+
+
+@pytest.mark.asyncio
+async def test_create_project_rejects_nested_group(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    with pytest.raises(quickchat.QuickChatError):
+        await quickchat.create_project(conn, config, "dem", "ALL/deep/deeper", "Вложенный проект")
+
+
+@pytest.mark.asyncio
+async def test_create_project_rejects_empty_group(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    with pytest.raises(quickchat.QuickChatError):
+        await quickchat.create_project(conn, config, "dem", "", "Проект без группы")
