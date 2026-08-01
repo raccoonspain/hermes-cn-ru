@@ -214,6 +214,8 @@
   .btn-primary{background:var(--gold);color:var(--sky-deep);border:none}
   .btn-secondary{background:none;color:var(--text-dim);border:1px solid var(--panel-line)}
   .btn-secondary:hover{color:var(--text);border-color:var(--violet)}
+  .btn-danger{color:#e2726f;border-color:#e2726f}
+  .btn-danger:hover{color:#ff8f8b;border-color:#ff8f8b}
 
   .overlay{position:fixed;inset:0;background:rgba(6,8,16,.72);display:none;align-items:center;justify-content:center;z-index:10}
   .overlay.on{display:flex}
@@ -448,12 +450,27 @@ function renderPanel(p, detail){
     <div class="p-actions">
       <button class="btn-primary" id="openProjectBtn">Открыть проект →</button>
       <button class="btn-secondary" id="movePanelBtn">Перенести в другую группу</button>
+      <button class="btn-secondary btn-danger" id="deletePanelBtn">Удалить проект</button>
     </div>
   `;
   document.getElementById('openProjectBtn').addEventListener('click', () => {
     location.href = 'project-workspace.html?path=' + encodeURIComponent(p.path);
   });
   document.getElementById('movePanelBtn').addEventListener('click', () => openMoveModal(p));
+  document.getElementById('deletePanelBtn').addEventListener('click', async () => {
+    if (!confirm(`Удалить проект «${p.title}»? Будет перемещён в корзину, восстановить можно только вручную.`)) return;
+    const resp = await apiFetch('/api/projects/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: p.path }),
+    });
+    if (resp.status === 401) { location.href = 'login.html'; return; }
+    if (!resp.ok) { alert('Не удалось удалить проект'); return; }
+    document.body.classList.remove('panel-open');
+    state.selectedProject = null;
+    await loadGroups();
+    renderGroups();
+    await loadProjects();
+  });
 }
 
 async function openPanel(p){
