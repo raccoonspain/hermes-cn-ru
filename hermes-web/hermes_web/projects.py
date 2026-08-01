@@ -105,7 +105,10 @@ def list_groups(user: str, db_conn, config) -> list:
     user_root = os.path.join(root, user)
     disk_slugs = set()
     if os.path.isdir(user_root):
-        disk_slugs = {name for name in os.listdir(user_root) if os.path.isdir(os.path.join(user_root, name))}
+        disk_slugs = {
+            name for name in os.listdir(user_root)
+            if os.path.isdir(os.path.join(user_root, name)) and not name.startswith(".")
+        }
     disk_slugs.add(ALL_GROUP_SLUG)
 
     meta_by_slug = {row["slug"]: row for row in storage.list_group_meta(db_conn, user)}
@@ -187,4 +190,14 @@ async def move_project(user: str, project_path: str, config, db_conn, new_group=
         ),
     )
     storage.update_chat_session_project_path(db_conn, result["old_path"], result["new_path"])
+    return result
+
+
+async def delete_project(user: str, project_path: str, config, db_conn) -> dict:
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None,
+        functools.partial(project_index_core.delete_project, user, project_path, **_project_index_kwargs(config)),
+    )
+    storage.update_chat_session_project_path(db_conn, result["old_path"], result["trashed_path"])
     return result

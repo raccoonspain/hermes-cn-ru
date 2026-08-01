@@ -229,3 +229,50 @@ async def test_move_project_collision_raises(tmp_path):
 
     with pytest.raises(project_index_core.ProjectIndexError):
         await projects.move_project("dem", "dem/ALL/a", config, conn, new_group="1С")
+
+
+@pytest.mark.asyncio
+async def test_delete_project_runs_in_executor(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    calling_thread = threading.current_thread()
+    seen = {}
+
+    def fake_delete_project(user, project_path, **kwargs):
+        seen["thread"] = threading.current_thread()
+        return {"old_path": "/old", "trashed_path": "/old/.trash/stamp_old"}
+
+    monkeypatch.setattr(projects.project_index_core, "delete_project", fake_delete_project)
+    result = await projects.delete_project("dem", "dem/ALL/a", config, conn)
+
+    assert result["trashed_path"] == "/old/.trash/stamp_old"
+    # delete_project ходит на диск (shutil.move) — обязано происходить вне event loop.
+    assert seen["thread"] is not calling_thread
+    assert seen["thread"] is not threading.main_thread()
+
+
+@pytest.mark.asyncio
+async def test_delete_project_updates_chat_session_path(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    old_path = str(tmp_path / "workspace" / "dem" / "ALL" / "a")
+    storage.create_chat_session(conn, "chat1", "dem", old_path, "web_1", created_at=1.0)
+
+    result = await projects.delete_project("dem", "dem/ALL/a", config, conn)
+
+    row = storage.get_chat_session(conn, "chat1")
+    assert row["project_path"] == result["trashed_path"]
+
+
+def test_list_groups_excludes_trash_directory(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    user_root = tmp_path / "workspace" / "dem"
+    (user_root / ".trash").mkdir(parents=True)
+    (user_root / "1С").mkdir()
+
+    groups = projects.list_groups("dem", conn, config)
+    slugs = {g["slug"] for g in groups}
+    assert ".trash" not in slugs
+    assert "1С" in slugs

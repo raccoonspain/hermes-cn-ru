@@ -53,6 +53,13 @@ def test_rename_path_moves_the_row(tmp_path):
     assert storage.get_project(conn, "/new/path")["title"] == "т"
 
 
+def test_delete_project_removes_the_row(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "index.db"))
+    storage.upsert_project(conn, "/p/a", "т", [], "active", None, "2026-01-01T00:00:00")
+    storage.delete_project(conn, "/p/a")
+    assert storage.get_project(conn, "/p/a") is None
+
+
 def test_list_projects_for_user_filters_by_prefix(tmp_path):
     conn = storage.get_connection(str(tmp_path / "index.db"))
     storage.upsert_project(conn, "/workspace/dem/ALL/x", "dem-x", [], "active", None, "t")

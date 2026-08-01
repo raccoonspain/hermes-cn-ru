@@ -411,3 +411,47 @@ def test_list_projects_for_user_does_not_return_raw_embedding(tmp_path, monkeypa
 
     result = core.list_projects_for_user("dem", workspace_root=str(tmp_path), db_path=db_path)
     assert "embedding" not in result[0]
+
+
+def test_delete_project_moves_to_trash_and_removes_from_index(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/proj")
+    db_path = str(tmp_path / "index.db")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: [0.1])
+    core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path, api_key="key")
+
+    result = core.delete_project("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+
+    assert not os.path.exists(str(tmp_path / "dem" / "ALL" / "proj"))
+    assert os.path.isdir(result["trashed_path"])
+    assert os.path.isfile(os.path.join(result["trashed_path"], "about.md"))
+    assert os.path.dirname(result["trashed_path"]) == str(tmp_path / "dem" / ".trash")
+    conn = core.storage.get_connection(db_path)
+    assert core.storage.get_project(conn, result["old_path"]) is None
+
+
+def test_delete_project_not_a_project_raises(tmp_path):
+    (tmp_path / "dem" / "ALL" / "empty").mkdir(parents=True)
+    with pytest.raises(core.ProjectIndexError):
+        core.delete_project("dem", "dem/ALL/empty", workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"))
+    assert os.path.isdir(str(tmp_path / "dem" / "ALL" / "empty"))
+
+
+def test_delete_project_twice_with_same_leaf_does_not_collide(tmp_path):
+    _write_project(tmp_path, "dem/ALL/proj")
+    db_path = str(tmp_path / "index.db")
+
+    result1 = core.delete_project("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+    _write_project(tmp_path, "dem/ALL/proj")
+    result2 = core.delete_project("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+
+    assert result1["trashed_path"] != result2["trashed_path"]
+    assert os.path.isdir(result1["trashed_path"])
+    assert os.path.isdir(result2["trashed_path"])
+
+
+def test_delete_project_cross_user_raises(tmp_path):
+    _write_project(tmp_path, "dem/ALL/proj")
+    (tmp_path / "rost").mkdir()
+    with pytest.raises(core.ProjectIndexError):
+        core.delete_project("rost", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"))
+    assert os.path.isdir(str(tmp_path / "dem" / "ALL" / "proj"))

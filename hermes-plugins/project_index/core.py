@@ -12,6 +12,7 @@ import datetime
 import os
 import re
 import shutil
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +22,7 @@ from . import embeddings, storage
 
 WORKSPACE_ROOT = "/home/hermes/workspace"
 DB_PATH = str(Path(__file__).resolve().parent / "index.db")
+TRASH_DIR_NAME = ".trash"
 
 _SECTION_HEADER_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_")
@@ -280,6 +282,36 @@ def move_project(
         "indexed": index_result["indexed"],
         "session_restart_required": True,
     }
+
+
+def delete_project(
+    user: str,
+    project_path: str,
+    workspace_root: str = WORKSPACE_ROOT,
+    db_path: str = DB_PATH,
+) -> dict:
+    root = os.path.realpath(workspace_root)
+    old_path = resolve_project_path(user, project_path, workspace_root)
+    if not os.path.isfile(_about_md_path(old_path)):
+        raise ProjectIndexError(f"'{project_path}' не проект (нет about.md)")
+
+    user_root = os.path.join(root, user)
+    trash_dir = os.path.join(user_root, TRASH_DIR_NAME)
+    os.makedirs(trash_dir, exist_ok=True)
+
+    leaf = os.path.basename(old_path)
+    stamp = f"{datetime.date.today().isoformat()}_{uuid.uuid4().hex[:8]}"
+    trashed_path = os.path.join(trash_dir, f"{stamp}_{leaf}")
+
+    shutil.move(old_path, trashed_path)
+
+    conn = storage.get_connection(db_path)
+    try:
+        storage.delete_project(conn, old_path)
+    finally:
+        conn.close()
+
+    return {"old_path": old_path, "trashed_path": trashed_path}
 
 
 def reindex_all(

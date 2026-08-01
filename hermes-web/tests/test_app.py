@@ -972,3 +972,37 @@ async def test_project_upload_collision_returns_409(aiohttp_client, app_and_conn
 
     assert (await upload()).status == 200
     assert (await upload()).status == 409
+
+
+@pytest.mark.asyncio
+async def test_delete_project_requires_auth(aiohttp_client, app_and_conn):
+    client = await aiohttp_client(app_and_conn)
+    resp = await client.post("/api/projects/delete", json={"path": "dem/ALL/a"})
+    assert resp.status == 401
+
+
+@pytest.mark.asyncio
+async def test_delete_project_success(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_delete_project(user, path, config, db_conn):
+        assert path == "dem/ALL/a"
+        return {"old_path": "/w/dem/ALL/a", "trashed_path": "/w/dem/.trash/2026-08-01_ab12cd34_a"}
+
+    monkeypatch.setattr("hermes_web.app.projects.delete_project", fake_delete_project)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/delete", json={"path": "dem/ALL/a"})
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["trashed_path"] == "/w/dem/.trash/2026-08-01_ab12cd34_a"
+
+
+@pytest.mark.asyncio
+async def test_delete_project_not_a_project_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_delete_project(user, path, config, db_conn):
+        raise projects.project_index_core.ProjectIndexError("не проект (нет about.md)")
+
+    monkeypatch.setattr("hermes_web.app.projects.delete_project", fake_delete_project)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/delete", json={"path": "dem/ALL/x"})
+    assert resp.status == 400
