@@ -252,6 +252,35 @@ async def test_delete_project_runs_in_executor(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_delete_project_does_not_pass_api_key(tmp_path, monkeypatch):
+    """project_index_core.delete_project() never touches embeddings (unlike
+    move_project, which needs api_key for its index_update call) — it has
+    no api_key parameter at all. If wormsoft_api_key is configured (the
+    normal case in prod, per run.py), passing it through would raise
+    TypeError: delete_project() got an unexpected keyword argument 'api_key'.
+    Regression test for that: config here has a real (non-None)
+    wormsoft_api_key, unlike _config()'s default."""
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = Config(
+        hermes_base_url="http://fake-hermes.invalid",
+        hermes_api_key="fake-key",
+        workspace_root=str(tmp_path / "workspace"),
+        project_index_db_path=str(tmp_path / "project_index.db"),
+        wormsoft_api_key="real-wormsoft-key",
+    )
+    seen_kwargs = {}
+
+    def fake_delete_project(user, project_path, **kwargs):
+        seen_kwargs.update(kwargs)
+        return {"old_path": "/old", "trashed_path": "/old/.trash/stamp_old"}
+
+    monkeypatch.setattr(projects.project_index_core, "delete_project", fake_delete_project)
+    await projects.delete_project("dem", "dem/ALL/a", config, conn)
+
+    assert "api_key" not in seen_kwargs
+
+
+@pytest.mark.asyncio
 async def test_delete_project_updates_chat_session_path(tmp_path):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)

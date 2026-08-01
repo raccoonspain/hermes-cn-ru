@@ -197,7 +197,7 @@ async def delete_project(user: str, project_path: str, config, db_conn) -> dict:
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
-        functools.partial(project_index_core.delete_project, user, project_path, **_project_index_kwargs(config)),
+        functools.partial(project_index_core.delete_project, user, project_path, **_workspace_kwargs(config)),
     )
     storage.update_chat_session_project_path(db_conn, result["old_path"], result["trashed_path"])
     return result
