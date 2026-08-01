@@ -684,12 +684,31 @@ async def test_create_project_collision_raises_and_does_not_touch_disk(tmp_path)
         await quickchat.create_project(conn, config, "dem", "1С", "Проект")
 
     assert os.path.getmtime(first["project_path"]) == mtime_before
+
+
+@pytest.mark.asyncio
+async def test_create_project_group_traversal_raises_and_does_not_touch_disk(tmp_path):
+    """group приходит из HTTP (POST /api/projects) — та же уязвимость, что
+    ревью 2026-07-26 нашло в move_project для new_group: без валидации
+    итогового пути через resolve_project_path запрос вида
+    group="../rost" создал бы папку в чужом пространстве пользователя."""
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    (tmp_path / "workspace" / "rost").mkdir(parents=True)
+
+    with pytest.raises(quickchat.QuickChatError):
+        await quickchat.create_project(conn, config, "dem", "../rost", "Угнанный проект")
+
+    assert list((tmp_path / "workspace" / "rost").iterdir()) == []
 ```
 
 - [ ] **Step 2: Прогнать новые тесты, убедиться что падают**
 
 Run: `PROJECT_INDEX_PLUGIN_DIR=/home/deploy/hermes-cn-ru/hermes-plugins <venv>/bin/python3 -m pytest tests/test_quickchat.py -k create_project -v`
-Expected: 6 FAIL — `AttributeError: module 'hermes_web.quickchat' has no attribute 'create_project'`.
+Expected: 7 FAIL — 6 с `AttributeError: module 'hermes_web.quickchat' has no attribute 'create_project'`,
+плюс `test_create_project_group_traversal_raises_and_does_not_touch_disk` тоже
+FAIL той же причиной (функция ещё не существует — падает на самом вызове,
+не на отсутствии проверки, это ожидаемо на этом шаге).
 
 - [ ] **Step 3: Реализовать `create_project` в `hermes_web/quickchat.py`**
 
@@ -721,8 +740,15 @@ async def create_project(db_conn, config: Config, user: str, group: str, title: 
     else:
         leaf = projects.slugify(title)
 
+    # group приходит из HTTP — тот же двухслойный путь-контроль, что уже
+    # проверен ревью 2026-07-26 для move_project's new_group: путь назначения
+    # обязан резолвиться и проверяться ДО os.makedirs, иначе group="../rost"
+    # создаёт проект в чужом пространстве пользователя.
     project_rel_path = os.path.join(user, group, leaf)
-    project_abs_path = os.path.join(_workspace_root(config), user, group, leaf)
+    try:
+        project_abs_path = project_index_core.resolve_project_path(user, project_rel_path, _workspace_root(config))
+    except project_index_core.ProjectIndexError as exc:
+        raise QuickChatError(str(exc)) from exc
 
     if os.path.exists(project_abs_path):
         raise QuickChatError(f"в группе '{group}' уже есть проект с именем '{leaf}'")
@@ -750,7 +776,7 @@ async def create_project(db_conn, config: Config, user: str, group: str, title: 
 - [ ] **Step 4: Прогнать новые тесты, убедиться что проходят**
 
 Run: `PROJECT_INDEX_PLUGIN_DIR=/home/deploy/hermes-cn-ru/hermes-plugins <venv>/bin/python3 -m pytest tests/test_quickchat.py -k create_project -v`
-Expected: 6 passed.
+Expected: 7 passed.
 
 - [ ] **Step 5: Написать падающие тесты HTTP-эндпоинта в `hermes-web/tests/test_app.py`**
 
@@ -790,12 +816,24 @@ async def test_create_project_blank_title_returns_400(aiohttp_client, app_and_co
     await client.post("/login", json={"username": "dem", "password": "secret123"})
     resp = await client.post("/api/projects", json={"group": "ALL", "title": ""})
     assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_create_project_group_traversal_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_create_project(db_conn, config, user, group, title):
+        raise quickchat.QuickChatError(f"'{user}/{group}/x' не принадлежит пространству пользователя '{user}'")
+
+    monkeypatch.setattr("hermes_web.app.quickchat.create_project", fake_create_project)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects", json={"group": "../rost", "title": "Угнанный проект"})
+    assert resp.status == 400
 ```
 
 - [ ] **Step 6: Прогнать новые тесты, убедиться что падают**
 
 Run: `PROJECT_INDEX_PLUGIN_DIR=/home/deploy/hermes-cn-ru/hermes-plugins <venv>/bin/python3 -m pytest tests/test_app.py -k create_project -v`
-Expected: 3 FAIL — маршрут `POST /api/projects` не зарегистрирован (404).
+Expected: 4 FAIL — маршрут `POST /api/projects` не зарегистрирован (404).
 
 - [ ] **Step 7: Реализовать хендлер и роут в `hermes_web/app.py`**
 
@@ -838,13 +876,13 @@ async def handle_create_project(request: web.Request) -> web.Response:
 - [ ] **Step 8: Прогнать новые тесты, убедиться что проходят**
 
 Run: `PROJECT_INDEX_PLUGIN_DIR=/home/deploy/hermes-cn-ru/hermes-plugins <venv>/bin/python3 -m pytest tests/test_app.py -k create_project -v`
-Expected: 3 passed.
+Expected: 4 passed.
 
 - [ ] **Step 9: Прогнать весь `hermes-web/tests/`, убедиться что ничего не сломалось**
 
 Run: `PROJECT_INDEX_PLUGIN_DIR=/home/deploy/hermes-cn-ru/hermes-plugins <venv>/bin/python3 -m pytest tests/ -v`
-Expected: 234 passed (225 из Task 1 + 6 новых в `test_quickchat.py` из
-Step 1 + 3 новых в `test_app.py` из Step 5).
+Expected: 236 passed (225 из Task 1 + 7 новых в `test_quickchat.py` из
+Step 1 + 4 новых в `test_app.py` из Step 5).
 
 - [ ] **Step 10: Commit**
 
@@ -1275,7 +1313,7 @@ Expected: 3 passed.
 - [ ] **Step 14: Прогнать весь `hermes-web/tests/`, убедиться что ничего не сломалось**
 
 Run: `PROJECT_INDEX_PLUGIN_DIR=/home/deploy/hermes-cn-ru/hermes-plugins <venv>/bin/python3 -m pytest tests/ -v`
-Expected: 239 passed (234 из Task 3 + 2 новых в `test_projects.py` из
+Expected: 241 passed (236 из Task 3 + 2 новых в `test_projects.py` из
 Step 6 + 3 новых в `test_app.py` из Step 10).
 
 - [ ] **Step 15: Commit**
