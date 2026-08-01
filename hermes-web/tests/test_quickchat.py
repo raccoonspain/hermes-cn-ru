@@ -708,3 +708,93 @@ async def test_send_message_logs_missing_result_target_as_not_reinforced(tmp_pat
     assert "chat_session_id=chat2" in caplog.text
     assert "result_target=None" in caplog.text
     assert "reinforced=False" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_create_project_in_group_uses_human_readable_slug(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    result = await quickchat.create_project(conn, config, "dem", "1С", "Новый проект")
+
+    expected_leaf = quickchat.projects.slugify("Новый проект")
+    assert result["group"] == "1С"
+    assert result["project_path"] == str(tmp_path / "workspace" / "dem" / "1С" / expected_leaf)
+    assert os.path.isfile(os.path.join(result["project_path"], "about.md"))
+
+
+@pytest.mark.asyncio
+async def test_create_project_in_all_uses_date_prefixed_technical_slug(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    result = await quickchat.create_project(conn, config, "dem", "ALL", "Быстрый разговор про физику")
+
+    leaf = os.path.basename(result["project_path"])
+    assert quickchat.project_index_core._DATE_PREFIX_RE.match(leaf)
+    assert leaf.split("_", 1)[1].startswith("chat-")
+
+
+@pytest.mark.asyncio
+async def test_create_project_creates_full_scaffold(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    result = await quickchat.create_project(conn, config, "dem", "1С", "Проект")
+
+    for name in ("about.md", "AGENTS.md", "history.md"):
+        assert os.path.isfile(os.path.join(result["project_path"], name))
+    for bucket in ("source", "outer", "result"):
+        assert os.path.isdir(os.path.join(result["project_path"], bucket))
+
+
+@pytest.mark.asyncio
+async def test_create_project_indexes_it(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    result = await quickchat.create_project(conn, config, "dem", "1С", "Учёт материалов")
+
+    indexed = project_index_core.storage.get_project(
+        project_index_core.storage.get_connection(config.project_index_db_path),
+        result["project_path"],
+    )
+    assert indexed["title"] == "Учёт материалов"
+
+
+@pytest.mark.asyncio
+async def test_create_project_blank_title_raises(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    with pytest.raises(quickchat.QuickChatError):
+        await quickchat.create_project(conn, config, "dem", "ALL", "   ")
+
+
+@pytest.mark.asyncio
+async def test_create_project_collision_raises_and_does_not_touch_disk(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    first = await quickchat.create_project(conn, config, "dem", "1С", "Проект")
+    mtime_before = os.path.getmtime(first["project_path"])
+
+    with pytest.raises(quickchat.QuickChatError):
+        await quickchat.create_project(conn, config, "dem", "1С", "Проект")
+
+    assert os.path.getmtime(first["project_path"]) == mtime_before
+
+
+@pytest.mark.asyncio
+async def test_create_project_group_traversal_raises_and_does_not_touch_disk(tmp_path):
+    """group приходит из HTTP (POST /api/projects) — та же уязвимость, что
+    ревью 2026-07-26 нашло в move_project для new_group: без валидации
+    итогового пути через resolve_project_path запрос вида
+    group="../rost" создал бы папку в чужом пространстве пользователя."""
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    (tmp_path / "workspace" / "rost").mkdir(parents=True)
+
+    with pytest.raises(quickchat.QuickChatError):
+        await quickchat.create_project(conn, config, "dem", "../rost", "Угнанный проект")
+
+    assert list((tmp_path / "workspace" / "rost").iterdir()) == []

@@ -1006,3 +1006,50 @@ async def test_delete_project_not_a_project_returns_400(aiohttp_client, app_and_
     await client.post("/login", json={"username": "dem", "password": "secret123"})
     resp = await client.post("/api/projects/delete", json={"path": "dem/ALL/x"})
     assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_create_project_requires_auth(aiohttp_client, app_and_conn):
+    client = await aiohttp_client(app_and_conn)
+    resp = await client.post("/api/projects", json={"group": "ALL", "title": "x"})
+    assert resp.status == 401
+
+
+@pytest.mark.asyncio
+async def test_create_project_success(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_create_project(db_conn, config, user, group, title):
+        assert group == "1С"
+        assert title == "Новый проект"
+        return {"project_path": "/w/dem/1С/novyy-proekt", "group": "1С"}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.create_project", fake_create_project)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects", json={"group": "1С", "title": "Новый проект"})
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["project_path"] == "/w/dem/1С/novyy-proekt"
+
+
+@pytest.mark.asyncio
+async def test_create_project_blank_title_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_create_project(db_conn, config, user, group, title):
+        raise quickchat.QuickChatError("название проекта не может быть пустым")
+
+    monkeypatch.setattr("hermes_web.app.quickchat.create_project", fake_create_project)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects", json={"group": "ALL", "title": ""})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_create_project_group_traversal_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_create_project(db_conn, config, user, group, title):
+        raise quickchat.QuickChatError(f"'{user}/{group}/x' не принадлежит пространству пользователя '{user}'")
+
+    monkeypatch.setattr("hermes_web.app.quickchat.create_project", fake_create_project)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects", json={"group": "../rost", "title": "Угнанный проект"})
+    assert resp.status == 400

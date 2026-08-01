@@ -228,6 +228,18 @@ async def handle_update_group(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def handle_create_project(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    group = str(body.get("group", "ALL"))
+    title = str(body.get("title", ""))
+    try:
+        result = await quickchat.create_project(request.app["db"], request.app["quickchat_config"], user["username"], group, title)
+    except quickchat.QuickChatError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(result)
+
+
 async def handle_list_projects(request: web.Request) -> web.Response:
     user = _require_user(request)
     group = request.query.get("group", "*")
@@ -491,6 +503,7 @@ def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secur
     app.router.add_post("/api/groups", handle_create_group)
     app.router.add_put("/api/groups/{slug}", handle_update_group)
     app.router.add_get("/api/projects", handle_list_projects)
+    app.router.add_post("/api/projects", handle_create_project)
     app.router.add_get("/api/projects/detail", handle_project_detail)
     app.router.add_post("/api/projects/search", handle_search_projects)
     app.router.add_post("/api/projects/move", handle_move_project)

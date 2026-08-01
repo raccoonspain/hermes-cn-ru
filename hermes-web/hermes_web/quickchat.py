@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
-from . import hermes_client, permissions, storage, workspace
+from . import hermes_client, permissions, projects, storage, workspace
 
 _PROJECT_INDEX_DIR = os.environ.get("PROJECT_INDEX_PLUGIN_DIR")
 if _PROJECT_INDEX_DIR and _PROJECT_INDEX_DIR not in sys.path:
@@ -110,6 +110,43 @@ def _backfill_project_scaffold(project_root: str) -> None:
             os.makedirs(path, exist_ok=True)
         except OSError:
             logger.warning("не удалось создать папку %s в %s", bucket, project_root, exc_info=True)
+
+
+async def create_project(db_conn, config: Config, user: str, group: str, title: str) -> dict:
+    title = title.strip()
+    if not title:
+        raise QuickChatError("название проекта не может быть пустым")
+
+    if group == "ALL":
+        today = datetime.date.today().isoformat()
+        leaf = f"{today}_chat-{uuid.uuid4().hex[:8]}"
+    else:
+        leaf = projects.slugify(title)
+
+    # group приходит из HTTP — тот же двухслойный путь-контроль, что уже
+    # проверен ревью 2026-07-26 для move_project's new_group: путь назначения
+    # обязан резолвиться и проверяться ДО os.makedirs, иначе group="../rost"
+    # создаёт проект в чужом пространстве пользователя.
+    project_rel_path = os.path.join(user, group, leaf)
+    try:
+        project_abs_path = project_index_core.resolve_project_path(user, project_rel_path, _workspace_root(config))
+    except project_index_core.ProjectIndexError as exc:
+        raise QuickChatError(str(exc)) from exc
+
+    if os.path.exists(project_abs_path):
+        raise QuickChatError(f"в группе '{group}' уже есть проект с именем '{leaf}'")
+
+    os.makedirs(project_abs_path, exist_ok=True)
+    with open(os.path.join(project_abs_path, "about.md"), "w", encoding="utf-8") as fh:
+        fh.write(ABOUT_MD_PLACEHOLDER.format(title=title))
+    _backfill_project_scaffold(project_abs_path)
+
+    loop = asyncio.get_running_loop()
+    index_result = await loop.run_in_executor(
+        None, functools.partial(project_index_core.index_update, user, project_rel_path, **_project_index_kwargs(config)),
+    )
+
+    return {"project_path": index_result["path"], "group": group}
 
 
 def _project_index_kwargs(config: Config) -> dict:
