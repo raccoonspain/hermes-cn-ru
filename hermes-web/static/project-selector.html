@@ -207,6 +207,15 @@
   .p-block p{margin:0;font-size:14.5px;line-height:1.65;color:var(--text)}
   .p-tags{display:flex;gap:6px;flex-wrap:wrap}
   .p-tags span{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:#e7e2fa;background:rgba(173,159,230,.24);border:1px solid rgba(173,159,230,.65);padding:3px 9px;border-radius:20px}
+  .p-tags-edit{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .p-tags-edit span{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:#e7e2fa;background:rgba(173,159,230,.24);border:1px solid rgba(173,159,230,.65);padding:3px 4px 3px 9px;border-radius:20px;display:inline-flex;align-items:center;gap:4px}
+  .tag-remove{background:none;border:none;color:inherit;cursor:pointer;font-size:11px;padding:0 3px;opacity:.75}
+  .tag-remove:hover{opacity:1}
+  .tag-add-row{display:flex;gap:6px}
+  .tag-add-row input{flex:1;background:var(--sky-deep);border:1px solid var(--panel-line);border-radius:8px;padding:6px 10px;color:var(--text);font-family:ui-monospace,Consolas,monospace;font-size:11px}
+  .tag-add-row button{font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:6px 12px;border-radius:8px;cursor:pointer;background:none;color:var(--text-dim);border:1px solid var(--panel-line)}
+  .tag-add-row button:hover{color:var(--text);border-color:var(--violet)}
+  #statusBadge{cursor:pointer}
   .p-actions{display:flex;flex-direction:column;gap:8px;margin-top:26px}
   .p-actions button{
     font-family:ui-monospace,Consolas,monospace;font-size:12px;padding:11px;border-radius:8px;cursor:pointer;
@@ -441,13 +450,21 @@ function renderPanel(p, detail){
   const now = detail ? (detail.now || '— нет —') : 'Загрузка…';
   document.getElementById('panelInner').innerHTML = `
     <button class="close" onclick="document.body.classList.remove('panel-open')">✕ закрыть</button>
-    <span class="p-status ${escapeHtml(p.status)}">${escapeHtml(p.status)}</span>
+    <span class="p-status ${escapeHtml(p.status)}" id="statusBadge" title="кликните, чтобы переключить active/archived">${escapeHtml(p.status)}</span>
     <h2>${escapeHtml(p.title)}</h2>
     <div class="p-group">${escapeHtml(pg.emoji || '🗂️')} ${escapeHtml(pg.display_name)}</div>
     <div class="p-block"><div class="lbl">Краткое описание</div><p>${escapeHtml(p.description)}</p></div>
     <div class="p-block"><div class="lbl">Опорные точки</div><p>${escapeHtml(points)}</p></div>
     <div class="p-block"><div class="lbl">На чём остановились</div><p>${escapeHtml(now)}</p></div>
-    <div class="p-block"><div class="lbl">Tags</div><div class="p-tags">${p.tags.map(t => '<span>#' + escapeHtml(t) + '</span>').join('') || '<span style="opacity:.5">— нет —</span>'}</div></div>
+    <div class="p-block">
+      <div class="lbl">Tags</div>
+      <div class="p-tags-edit" id="tagsEdit"></div>
+      <div class="tag-add-row">
+        <input id="newTagInput" list="tagSuggestions" placeholder="добавить тег…">
+        <datalist id="tagSuggestions"></datalist>
+        <button id="addTagBtn" type="button">+</button>
+      </div>
+    </div>
     <div class="p-actions">
       <button class="btn-primary" id="openProjectBtn">Открыть проект →</button>
       <button class="btn-secondary" id="movePanelBtn">Перенести в другую группу</button>
@@ -472,6 +489,74 @@ function renderPanel(p, detail){
     renderGroups();
     await loadProjects();
   });
+
+  let editingTags = [...p.tags];
+
+  function renderTagsEdit(){
+    const wrap = document.getElementById('tagsEdit');
+    wrap.innerHTML = editingTags.map(t =>
+      `<span>#${escapeHtml(t)} <button class="tag-remove" data-tag="${escapeHtml(t)}" type="button">×</button></span>`
+    ).join('') || '<span style="opacity:.5">— нет —</span>';
+    wrap.querySelectorAll('.tag-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        editingTags = editingTags.filter(t => t !== btn.dataset.tag);
+        renderTagsEdit();
+        saveTags();
+      });
+    });
+  }
+
+  function renderTagSuggestions(){
+    const allTags = new Set();
+    projects.forEach(pr => pr.tags.forEach(t => allTags.add(t)));
+    const dl = document.getElementById('tagSuggestions');
+    dl.innerHTML = [...allTags].map(t => `<option value="${escapeHtml(t)}">`).join('');
+  }
+
+  async function saveTags(){
+    const resp = await apiFetch('/api/projects/metadata', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: p.path, tags: editingTags }),
+    });
+    if (resp.status === 401) { location.href = 'login.html'; return; }
+    if (!resp.ok) { alert('Не удалось сохранить теги'); return; }
+    const updated = await resp.json();
+    p.tags = updated.tags;
+    editingTags = [...updated.tags];
+    const idx = projects.findIndex(x => x.path === p.path);
+    if (idx !== -1) projects[idx].tags = updated.tags;
+  }
+
+  document.getElementById('addTagBtn').addEventListener('click', () => {
+    const input = document.getElementById('newTagInput');
+    const val = input.value.trim();
+    if (!val || editingTags.includes(val)) return;
+    editingTags.push(val);
+    input.value = '';
+    renderTagsEdit();
+    saveTags();
+  });
+
+  document.getElementById('statusBadge').addEventListener('click', async () => {
+    const newStatus = p.status === 'archived' ? 'active' : 'archived';
+    const resp = await apiFetch('/api/projects/metadata', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: p.path, status: newStatus }),
+    });
+    if (resp.status === 401) { location.href = 'login.html'; return; }
+    if (!resp.ok) { alert('Не удалось сохранить статус'); return; }
+    const updated = await resp.json();
+    p.status = updated.status;
+    const idx = projects.findIndex(x => x.path === p.path);
+    if (idx !== -1) projects[idx].status = updated.status;
+    const badge = document.getElementById('statusBadge');
+    badge.textContent = p.status;
+    badge.className = 'p-status' + (p.status === 'archived' ? ' archived' : '');
+    renderMain();
+  });
+
+  renderTagsEdit();
+  renderTagSuggestions();
 }
 
 async function openPanel(p){
