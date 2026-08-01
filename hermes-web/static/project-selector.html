@@ -280,6 +280,7 @@
     <h2 id="headName">…</h2>
     <span id="headCount"></span>
     <button class="edit-group-btn" id="editGroupBtn">⚙️ настроить группу</button>
+    <button class="btn-primary" id="addProjectBtn" style="margin-left:8px;padding:6px 14px;font-family:ui-monospace,Consolas,monospace;font-size:11px;border-radius:20px">+ новый проект</button>
   </div>
 
   <div class="filters" id="filters">
@@ -514,6 +515,19 @@ document.getElementById('moveCancel').addEventListener('click', () => {
   document.getElementById('moveOverlay').classList.remove('on');
 });
 
+document.getElementById('addProjectBtn').addEventListener('click', async () => {
+  const title = prompt('Название нового проекта:');
+  if (!title || !title.trim()) return;
+  const resp = await apiFetch('/api/projects', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group: state.group, title }),
+  });
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert(err.error || 'Не удалось создать проект'); return; }
+  const created = await resp.json();
+  location.href = 'project-workspace.html?path=' + encodeURIComponent(created.project_path);
+});
+
 function renderMain(){
   const searching = searchResults !== null;
   document.getElementById('filters').classList.toggle('searching', searching);
@@ -529,6 +543,7 @@ function renderMain(){
   document.getElementById('headEmoji').textContent = g.emoji || '🗂️';
   document.getElementById('headName').textContent = g.display_name;
   document.getElementById('editGroupBtn').style.display = (everywhere || searching) ? 'none' : 'inline-block';
+  document.getElementById('addProjectBtn').style.display = (everywhere || searching) ? 'none' : 'inline-block';
   document.getElementById('headCount').textContent = searching ? `${list.length} похожих по смыслу` : `${list.length} из ${scopeTotal}`;
 
   const cloud = document.getElementById('tagCloud');
