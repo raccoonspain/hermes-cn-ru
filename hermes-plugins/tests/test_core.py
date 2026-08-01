@@ -1,5 +1,6 @@
 import datetime
 import os
+import shutil
 
 import pytest
 
@@ -447,6 +448,24 @@ def test_delete_project_not_a_project_raises(tmp_path):
     with pytest.raises(core.ProjectIndexError):
         core.delete_project("dem", "dem/ALL/empty", workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"))
     assert os.path.isdir(str(tmp_path / "dem" / "ALL" / "empty"))
+
+
+def test_delete_project_ghost_index_row_self_heals(tmp_path, monkeypatch):
+    """A DB row can outlive its directory (e.g. manually rm -rf'd before
+    delete_project existed). Deleting such a ghost should clear the index
+    row instead of raising — the user has no other way to remove it."""
+    _write_project(tmp_path, "dem/ALL/proj")
+    db_path = str(tmp_path / "index.db")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: [0.1])
+    core.index_update("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path, api_key="key")
+    shutil.rmtree(str(tmp_path / "dem" / "ALL" / "proj"))
+
+    result = core.delete_project("dem", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=db_path)
+
+    assert result["old_path"] == str(tmp_path / "dem" / "ALL" / "proj")
+    assert result["trashed_path"] == result["old_path"]
+    conn = core.storage.get_connection(db_path)
+    assert core.storage.get_project(conn, result["old_path"]) is None
 
 
 def test_delete_project_twice_with_same_leaf_does_not_collide(tmp_path):

@@ -1,5 +1,6 @@
 import datetime
 import os
+import shutil
 import sys
 import threading
 
@@ -292,6 +293,26 @@ async def test_delete_project_updates_chat_session_path(tmp_path):
 
     row = storage.get_chat_session(conn, "chat1")
     assert row["project_path"] == result["trashed_path"]
+
+
+@pytest.mark.asyncio
+async def test_delete_project_ghost_index_row_self_heals_and_keeps_chat_session_valid(tmp_path):
+    """core.delete_project's self-heal path returns trashed_path == old_path
+    for a ghost row (directory already gone). The wrapper's
+    update_chat_session_project_path call must not violate chat_sessions'
+    project_path NOT NULL constraint in that case."""
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    old_path = str(project_dir)
+    storage.create_chat_session(conn, "chat1", "dem", old_path, "web_1", created_at=1.0)
+    shutil.rmtree(project_dir)
+
+    result = await projects.delete_project("dem", "dem/ALL/a", config, conn)
+
+    assert result["trashed_path"] == result["old_path"] == old_path
+    row = storage.get_chat_session(conn, "chat1")
+    assert row["project_path"] == old_path
 
 
 def test_list_groups_excludes_trash_directory(tmp_path):

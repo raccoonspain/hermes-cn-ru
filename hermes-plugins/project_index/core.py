@@ -292,26 +292,32 @@ def delete_project(
 ) -> dict:
     root = os.path.realpath(workspace_root)
     old_path = resolve_project_path(user, project_path, workspace_root)
-    if not os.path.isfile(_about_md_path(old_path)):
-        raise ProjectIndexError(f"'{project_path}' не проект (нет about.md)")
-
-    user_root = os.path.join(root, user)
-    trash_dir = os.path.join(user_root, TRASH_DIR_NAME)
-    os.makedirs(trash_dir, exist_ok=True)
-
-    leaf = os.path.basename(old_path)
-    stamp = f"{datetime.date.today().isoformat()}_{uuid.uuid4().hex[:8]}"
-    trashed_path = os.path.join(trash_dir, f"{stamp}_{leaf}")
-
-    shutil.move(old_path, trashed_path)
 
     conn = storage.get_connection(db_path)
     try:
+        if not os.path.isfile(_about_md_path(old_path)):
+            # The directory can outlive its removal from disk while still
+            # having an index row (e.g. manually rm -rf'd before this
+            # function existed). Self-heal: drop the ghost row instead of
+            # raising, since the row is otherwise permanently stuck.
+            if storage.get_project(conn, old_path) is None:
+                raise ProjectIndexError(f"'{project_path}' не проект (нет about.md)")
+            storage.delete_project(conn, old_path)
+            return {"old_path": old_path, "trashed_path": old_path}
+
+        user_root = os.path.join(root, user)
+        trash_dir = os.path.join(user_root, TRASH_DIR_NAME)
+        os.makedirs(trash_dir, exist_ok=True)
+
+        leaf = os.path.basename(old_path)
+        stamp = f"{datetime.date.today().isoformat()}_{uuid.uuid4().hex[:8]}"
+        trashed_path = os.path.join(trash_dir, f"{stamp}_{leaf}")
+
+        shutil.move(old_path, trashed_path)
         storage.delete_project(conn, old_path)
+        return {"old_path": old_path, "trashed_path": trashed_path}
     finally:
         conn.close()
-
-    return {"old_path": old_path, "trashed_path": trashed_path}
 
 
 def _rewrite_frontmatter(project_dir: str, tags: list | None = None, status: str | None = None) -> None:
