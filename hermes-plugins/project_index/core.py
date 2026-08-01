@@ -314,6 +314,46 @@ def delete_project(
     return {"old_path": old_path, "trashed_path": trashed_path}
 
 
+def _rewrite_frontmatter(project_dir: str, tags: list | None = None, status: str | None = None) -> None:
+    about_path = _about_md_path(project_dir)
+    with open(about_path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    if not text.startswith("---"):
+        raise ProjectIndexError("about.md: отсутствует YAML frontmatter")
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        raise ProjectIndexError("about.md: некорректный YAML frontmatter")
+
+    frontmatter = yaml.safe_load(parts[1]) or {}
+    if tags is not None:
+        frontmatter["tags"] = tags
+    if status is not None:
+        frontmatter["status"] = status
+
+    new_frontmatter_text = yaml.safe_dump(frontmatter, allow_unicode=True, default_flow_style=False)
+    updated = f"---\n{new_frontmatter_text}---{parts[2]}"
+    with open(about_path, "w", encoding="utf-8") as fh:
+        fh.write(updated)
+
+
+def update_project_metadata(
+    user: str,
+    project_path: str,
+    tags: list | None = None,
+    status: str | None = None,
+    workspace_root: str = WORKSPACE_ROOT,
+    db_path: str = DB_PATH,
+    api_key: Optional[str] = None,
+) -> dict:
+    resolved = resolve_project_path(user, project_path, workspace_root)
+    if not os.path.isfile(_about_md_path(resolved)):
+        raise ProjectIndexError(f"'{project_path}' не проект (нет about.md)")
+
+    _rewrite_frontmatter(resolved, tags=tags, status=status)
+    index_update(user, project_path, workspace_root, db_path, api_key)
+    return get_project_detail(user, project_path, workspace_root)
+
+
 def reindex_all(
     user: str,
     workspace_root: str = WORKSPACE_ROOT,

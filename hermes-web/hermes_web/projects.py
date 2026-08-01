@@ -201,3 +201,14 @@ async def delete_project(user: str, project_path: str, config, db_conn) -> dict:
     )
     storage.update_chat_session_project_path(db_conn, result["old_path"], result["trashed_path"])
     return result
+
+
+async def update_project_metadata(user: str, project_path: str, config, tags=None, status=None) -> dict:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        functools.partial(
+            project_index_core.update_project_metadata, user, project_path,
+            tags=tags, status=status, **_project_index_kwargs(config),
+        ),
+    )

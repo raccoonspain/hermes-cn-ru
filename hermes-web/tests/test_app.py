@@ -1053,3 +1053,38 @@ async def test_create_project_group_traversal_returns_400(aiohttp_client, app_an
     await client.post("/login", json={"username": "dem", "password": "secret123"})
     resp = await client.post("/api/projects", json={"group": "../rost", "title": "Угнанный проект"})
     assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_update_project_metadata_requires_auth(aiohttp_client, app_and_conn):
+    client = await aiohttp_client(app_and_conn)
+    resp = await client.post("/api/projects/metadata", json={"path": "dem/ALL/a", "tags": ["x"]})
+    assert resp.status == 401
+
+
+@pytest.mark.asyncio
+async def test_update_project_metadata_success(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_update_project_metadata(user, path, config, tags=None, status=None):
+        assert path == "dem/ALL/a"
+        assert tags == ["физика", "задачник"]
+        return {"title": "т", "description": "d", "points": "", "now": "", "tags": tags, "status": "active", "path": "/w/dem/ALL/a", "group": "ALL"}
+
+    monkeypatch.setattr("hermes_web.app.projects.update_project_metadata", fake_update_project_metadata)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/metadata", json={"path": "dem/ALL/a", "tags": ["физика", "задачник"]})
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["tags"] == ["физика", "задачник"]
+
+
+@pytest.mark.asyncio
+async def test_update_project_metadata_not_found_returns_400(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_update_project_metadata(user, path, config, tags=None, status=None):
+        raise projects.project_index_core.ProjectIndexError("не проект (нет about.md)")
+
+    monkeypatch.setattr("hermes_web.app.projects.update_project_metadata", fake_update_project_metadata)
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/metadata", json={"path": "dem/ALL/x", "tags": []})
+    assert resp.status == 400

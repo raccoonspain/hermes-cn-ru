@@ -455,3 +455,72 @@ def test_delete_project_cross_user_raises(tmp_path):
     with pytest.raises(core.ProjectIndexError):
         core.delete_project("rost", "dem/ALL/proj", workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"))
     assert os.path.isdir(str(tmp_path / "dem" / "ALL" / "proj"))
+
+
+ABOUT_MD_WITH_TAGS = """---
+tags: [excel, работа]
+status: active
+---
+
+# Название проекта
+Тест
+
+# Краткое описание
+Описание
+
+# Опорные точки
+пункт
+
+# На чём остановились
+ничего
+"""
+
+
+def test_rewrite_frontmatter_updates_tags_preserves_status_and_body(tmp_path):
+    project_dir = _write_project(tmp_path, "dem/ALL/proj", about_content=ABOUT_MD_WITH_TAGS)
+    core._rewrite_frontmatter(str(project_dir), tags=["новый"])
+    about = core._read_about(str(project_dir))
+    assert about["tags"] == ["новый"]
+    assert about["status"] == "active"
+    assert about["title"] == "Тест"
+    assert about["points"] == "пункт"
+
+
+def test_rewrite_frontmatter_updates_status_only_preserves_tags(tmp_path):
+    project_dir = _write_project(tmp_path, "dem/ALL/proj", about_content=ABOUT_MD_WITH_TAGS)
+    core._rewrite_frontmatter(str(project_dir), status="archived")
+    about = core._read_about(str(project_dir))
+    assert about["status"] == "archived"
+    assert about["tags"] == ["excel", "работа"]
+
+
+def test_rewrite_frontmatter_missing_frontmatter_raises(tmp_path):
+    project_dir = tmp_path / "dem" / "ALL" / "proj"
+    project_dir.mkdir(parents=True)
+    (project_dir / "about.md").write_text("# Название проекта\nX\n", encoding="utf-8")
+    with pytest.raises(core.ProjectIndexError):
+        core._rewrite_frontmatter(str(project_dir), tags=["x"])
+
+
+def test_update_project_metadata_updates_tags_and_reindexes(tmp_path, monkeypatch):
+    _write_project(tmp_path, "dem/ALL/proj", about_content=ABOUT_MD_WITH_TAGS)
+    db_path = str(tmp_path / "index.db")
+    monkeypatch.setattr(core.embeddings, "fetch_embedding", lambda text, api_key: [0.2])
+
+    result = core.update_project_metadata(
+        "dem", "dem/ALL/proj", tags=["новый"], workspace_root=str(tmp_path), db_path=db_path, api_key="key",
+    )
+
+    assert result["tags"] == ["новый"]
+    conn = core.storage.get_connection(db_path)
+    row = core.storage.get_project(conn, result["path"])
+    assert row["tags"] == ["новый"]
+    assert row["embedding"] == pytest.approx([0.2])
+
+
+def test_update_project_metadata_not_a_project_raises(tmp_path):
+    (tmp_path / "dem" / "ALL" / "empty").mkdir(parents=True)
+    with pytest.raises(core.ProjectIndexError):
+        core.update_project_metadata(
+            "dem", "dem/ALL/empty", tags=["x"], workspace_root=str(tmp_path), db_path=str(tmp_path / "index.db"),
+        )

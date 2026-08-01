@@ -305,3 +305,35 @@ def test_list_groups_excludes_trash_directory(tmp_path):
     slugs = {g["slug"] for g in groups}
     assert ".trash" not in slugs
     assert "1С" in slugs
+
+
+@pytest.mark.asyncio
+async def test_update_project_metadata_runs_in_executor(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    calling_thread = threading.current_thread()
+    seen = {}
+
+    def fake_update_project_metadata(user, project_path, tags=None, status=None, **kwargs):
+        seen["thread"] = threading.current_thread()
+        return {"title": "т", "description": "d", "points": "", "now": "", "tags": tags or [], "status": status or "active", "path": "/p", "group": "ALL"}
+
+    monkeypatch.setattr(projects.project_index_core, "update_project_metadata", fake_update_project_metadata)
+    result = await projects.update_project_metadata("dem", "dem/ALL/a", config, tags=["x"])
+
+    assert result["tags"] == ["x"]
+    assert seen["thread"] is not calling_thread
+    assert seen["thread"] is not threading.main_thread()
+
+
+@pytest.mark.asyncio
+async def test_update_project_metadata_updates_tags_on_disk(tmp_path):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+
+    result = await projects.update_project_metadata("dem", "dem/ALL/a", config, tags=["новый"])
+
+    assert result["tags"] == ["новый"]
+    detail = projects.get_project_detail("dem", "dem/ALL/a", config)
+    assert detail["tags"] == ["новый"]

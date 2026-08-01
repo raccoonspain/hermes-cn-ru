@@ -303,6 +303,19 @@ async def handle_delete_project(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def handle_update_project_metadata(request: web.Request) -> web.Response:
+    user = _require_user(request)
+    body = await request.json()
+    path = str(body.get("path", ""))
+    tags = body.get("tags")
+    status = body.get("status")
+    try:
+        result = await projects.update_project_metadata(user["username"], path, request.app["quickchat_config"], tags=tags, status=status)
+    except projects.project_index_core.ProjectIndexError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(result)
+
+
 async def handle_open_project(request: web.Request) -> web.Response:
     user = _require_user(request)
     body = await request.json()
@@ -508,6 +521,7 @@ def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secur
     app.router.add_post("/api/projects/search", handle_search_projects)
     app.router.add_post("/api/projects/move", handle_move_project)
     app.router.add_post("/api/projects/delete", handle_delete_project)
+    app.router.add_post("/api/projects/metadata", handle_update_project_metadata)
     app.router.add_post("/api/projects/open", handle_open_project)
     app.router.add_get("/api/projects/tree", handle_project_tree)
     app.router.add_get("/api/projects/file", handle_project_file_get)
