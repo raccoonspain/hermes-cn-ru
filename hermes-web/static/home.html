@@ -116,8 +116,7 @@ document.getElementById('quickChatTile').addEventListener('click', async (e) => 
     if (resp.status === 401) { location.href = 'login.html'; return; }
     if (!resp.ok) { alert('Не удалось начать чат — попробуйте ещё раз'); return; }
     const body = await resp.json();
-    const params = new URLSearchParams({ id: body.chat_session_id, path: body.project_path || '' });
-    location.href = `chat.html?${params.toString()}`;
+    location.href = `project-workspace.html?path=${encodeURIComponent(body.project_path)}`;
   } catch (err) {
     alert('Hermes временно недоступен, попробуйте ещё раз');
   }

@@ -1,4 +1,4 @@
-// Общие хелперы для login.html/home.html/chat.html — без сборщика, обычный <script src="app.js">.
+// Общие хелперы для login.html/home.html/project-selector.html/project-workspace.html — без сборщика, обычный <script src="app.js">.
 
 async function apiFetch(url, options = {}) {
   const resp = await fetch(url, { credentials: 'same-origin', ...options });
