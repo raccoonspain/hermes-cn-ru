@@ -1,6 +1,6 @@
 """aiohttp web application: login/logout, /api/me, quick-chat, chat send/history,
 плюс раздача статики. Неавторизованные HTML-страницы (login.html/home.html/
-project-workspace.html) отдаются как обычные статические файлы — секретов
+project-selector.html/project-workspace.html) отдаются как обычные статические файлы — секретов
 в них нет, авторизация проверяется на уровне API (/api/me и т.д.), а
 фронтенд сам редиректит на /login.html при 401 (см. static-JS в Task 7)."""
 from __future__ import annotations

@@ -654,6 +654,54 @@ async def test_get_or_open_session_leaves_no_orphan_when_hermes_fails(tmp_path, 
 
 
 @pytest.mark.asyncio
+async def test_create_quick_chat_then_get_or_open_session_reuses_same_session(tmp_path, monkeypatch):
+    """Regression test for the core invariant: after create_quick_chat creates
+    a project, calling get_or_open_session with that project_path must REUSE
+    the same chat session, not create a second one.
+
+    This tests the redirect flow: /api/quick-chat returns project_path, which
+    gets passed as a URL parameter to project-workspace.html, which then calls
+    /api/projects/open, which calls get_or_open_session. The session created
+    by create_quick_chat must be found and reused, not discarded.
+    """
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    created_sessions = []
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        created_sessions.append(session_id)
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    # Step 1: Call create_quick_chat (mocking only Hermes HTTP call)
+    create_result = await quickchat.create_quick_chat(conn, http_session=None, config=config, user="dem")
+    original_chat_session_id = create_result["chat_session_id"]
+    original_hermes_session_id = create_result["hermes_session_id"]
+    project_path_absolute = create_result["project_path"]
+
+    # Convert absolute path to relative (what get_or_open_session expects)
+    workspace_root = config.workspace_root
+    project_path_relative = os.path.relpath(project_path_absolute, workspace_root)
+
+    # Step 2: Call get_or_open_session with the project path from create_quick_chat
+    # This simulates what happens when redirecting to project-workspace.html?path=<project_path>
+    open_result = await quickchat.get_or_open_session(
+        conn, http_session=None, config=config, user="dem", project_path=project_path_relative
+    )
+
+    # Step 3: Verify the session was REUSED, not recreated
+    assert open_result["chat_session_id"] == original_chat_session_id
+    assert open_result["hermes_session_id"] == original_hermes_session_id
+    assert open_result["project_path"] == project_path_absolute
+
+    # Step 4: Verify create_session was called exactly once total (only in create_quick_chat)
+    # If get_or_open_session had created a new session, we'd have 2 calls here
+    assert len(created_sessions) == 1, f"Expected hermes_client.create_session called 1 time, but was called {len(created_sessions)} times"
+
+
+@pytest.mark.asyncio
 async def test_send_message_logs_result_target_and_reinforcement(tmp_path, monkeypatch, caplog):
     conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
     config = _config(tmp_path)
