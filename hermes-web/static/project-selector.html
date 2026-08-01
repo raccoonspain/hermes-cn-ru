@@ -499,9 +499,10 @@ function renderPanel(p, detail){
     ).join('') || '<span style="opacity:.5">— нет —</span>';
     wrap.querySelectorAll('.tag-remove').forEach(btn => {
       btn.addEventListener('click', () => {
+        const prevTags = [...editingTags];
         editingTags = editingTags.filter(t => t !== btn.dataset.tag);
         renderTagsEdit();
-        saveTags();
+        saveTags(prevTags);
       });
     });
   }
@@ -513,28 +514,35 @@ function renderPanel(p, detail){
     dl.innerHTML = [...allTags].map(t => `<option value="${escapeHtml(t)}">`).join('');
   }
 
-  async function saveTags(){
+  async function saveTags(prevTags){
     const resp = await apiFetch('/api/projects/metadata', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: p.path, tags: editingTags }),
     });
     if (resp.status === 401) { location.href = 'login.html'; return; }
-    if (!resp.ok) { alert('Не удалось сохранить теги'); return; }
+    if (!resp.ok) {
+      editingTags = prevTags;
+      renderTagsEdit();
+      alert('Не удалось сохранить теги');
+      return;
+    }
     const updated = await resp.json();
     p.tags = updated.tags;
     editingTags = [...updated.tags];
     const idx = projects.findIndex(x => x.path === p.path);
     if (idx !== -1) projects[idx].tags = updated.tags;
+    renderTagsEdit();
   }
 
   document.getElementById('addTagBtn').addEventListener('click', () => {
     const input = document.getElementById('newTagInput');
     const val = input.value.trim();
-    if (!val || editingTags.includes(val)) return;
+    if (!val || editingTags.some(t => t.toLowerCase() === val.toLowerCase())) return;
+    const prevTags = [...editingTags];
     editingTags.push(val);
     input.value = '';
     renderTagsEdit();
-    saveTags();
+    saveTags(prevTags);
   });
 
   document.getElementById('statusBadge').addEventListener('click', async () => {
