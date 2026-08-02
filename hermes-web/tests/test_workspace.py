@@ -671,3 +671,125 @@ def test_move_entry_rejects_dest_dir_that_is_a_file(tmp_path):
 
     with pytest.raises(workspace.WorkspaceError):
         workspace.move_entry("dem", "dem/ALL/a", "source/note.txt", "not_a_dir.txt", None, config)
+
+
+def test_delete_entry_removes_file_in_bucket(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    result = workspace.delete_entry("dem", "dem/ALL/a", "source/note.txt", config)
+
+    assert result["relative_path"] == "source/note.txt"
+    assert not (project_dir / "source" / "note.txt").exists()
+
+
+def test_delete_entry_removes_folder_with_contents(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    nested = project_dir / "outer" / "topic"
+    nested.mkdir(parents=True)
+    (nested / "a.txt").write_text("a", encoding="utf-8")
+
+    result = workspace.delete_entry("dem", "dem/ALL/a", "outer/topic", config)
+
+    assert result["relative_path"] == "outer/topic"
+    assert not (project_dir / "outer" / "topic").exists()
+
+
+def test_delete_entry_removes_misc_file_outside_buckets(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "loose.html").write_text("<html></html>", encoding="utf-8")
+
+    result = workspace.delete_entry("dem", "dem/ALL/a", "loose.html", config)
+
+    assert result["relative_path"] == "loose.html"
+    assert not (project_dir / "loose.html").exists()
+
+
+def test_delete_entry_rejects_hidden_misc_path(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    hidden_dir = project_dir / ".git"
+    hidden_dir.mkdir()
+    (hidden_dir / "config").write_text("x", encoding="utf-8")
+
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.delete_entry("dem", "dem/ALL/a", ".git/config", config)
+    assert (hidden_dir / "config").exists()
+
+
+def test_delete_entry_rejects_missing_entry(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.delete_entry("dem", "dem/ALL/a", "source/nope.txt", config)
+
+
+def test_delete_entry_rejects_traversal(tmp_path):
+    config = _config(tmp_path)
+    _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.delete_entry("dem", "dem/ALL/a", "../../etc/passwd", config)
+
+
+def test_delete_entry_rejects_bucket_dir_itself(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.delete_entry("dem", "dem/ALL/a", "source", config)
+    assert (project_dir / "source").exists()
+
+
+def test_delete_entry_rejects_about_md(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.delete_entry("dem", "dem/ALL/a", "about.md", config)
+    assert (project_dir / "about.md").exists()
+
+
+def test_delete_entry_rejects_project_root(tmp_path):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.delete_entry("dem", "dem/ALL/a", ".", config)
+    assert project_dir.exists()
+
+
+def test_delete_entry_ensures_ownership_before_write(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+
+    calls = []
+    monkeypatch.setattr(workspace.permissions, "ensure_ownership_sync", lambda root: calls.append(root))
+
+    workspace.delete_entry("dem", "dem/ALL/a", "source/note.txt", config)
+
+    assert calls == [str(project_dir)]
+
+
+def test_delete_entry_removes_symlink_not_its_target(tmp_path):
+    """Удаляемый элемент может оказаться симлинком (например, агент мог его
+    создать внутри своей песочницы) — resolve_file_path отдаёт realpath
+    ЦЕЛИ, а не самой ссылки. Наивная реализация удалила бы файл, на который
+    ссылка указывает, вместо самой ссылки — потеря чужих данных."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "outer").mkdir()
+    target = project_dir / "outer" / "real.txt"
+    target.write_text("настоящий файл", encoding="utf-8")
+    link = project_dir / "source" / "link.txt"
+    os.symlink(target, link)
+
+    result = workspace.delete_entry("dem", "dem/ALL/a", "source/link.txt", config)
+
+    assert result["relative_path"] == "source/link.txt"
+    assert not os.path.lexists(link)
+    assert target.read_text(encoding="utf-8") == "настоящий файл"

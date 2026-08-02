@@ -16,6 +16,7 @@ import datetime
 import functools
 import os
 import re
+import shutil
 import sys
 
 _PROJECT_INDEX_DIR = os.environ.get("PROJECT_INDEX_PLUGIN_DIR")
@@ -89,12 +90,17 @@ def resolve_file_path(user: str, project_path: str, relative_path: str, config) 
     return project_root, candidate
 
 
-def _require_within_bucket(project_root: str, candidate: str) -> None:
+def _within_bucket(project_root: str, candidate: str) -> bool:
     for bucket in BUCKETS:
         bucket_dir = os.path.join(project_root, bucket)
         if candidate == bucket_dir or candidate.startswith(bucket_dir + os.sep):
-            return
-    raise WorkspaceError("путь должен быть внутри source/outer/result")
+            return True
+    return False
+
+
+def _require_within_bucket(project_root: str, candidate: str) -> None:
+    if not _within_bucket(project_root, candidate):
+        raise WorkspaceError("путь должен быть внутри source/outer/result")
 
 
 def _iso_mtime(path: str) -> str:
@@ -318,3 +324,35 @@ def move_entry(user: str, project_path: str, source: str, dest_dir: str, new_nam
         raise WorkspaceError(f"не удалось переместить '{source}': {exc}") from exc
 
     return {"relative_path": os.path.relpath(target, project_root)}
+
+
+def delete_entry(user: str, project_path: str, relative_path: str, config) -> dict:
+    project_root, candidate = resolve_file_path(user, project_path, relative_path, config)
+    literal_path = os.path.join(project_root, relative_path)
+
+    if not os.path.lexists(literal_path):
+        raise WorkspaceError(f"'{relative_path}' не найден")
+    if candidate == project_root:
+        raise WorkspaceError(f"'{relative_path}' нельзя удалить")
+    for root_file in ROOT_EDITABLE_FILES:
+        if candidate == os.path.join(project_root, root_file):
+            raise WorkspaceError(f"'{relative_path}' нельзя удалить")
+    for bucket in BUCKETS:
+        if candidate == os.path.join(project_root, bucket):
+            raise WorkspaceError(f"'{relative_path}' нельзя удалить — это сам bucket '{bucket}'")
+
+    if not _within_bucket(project_root, candidate):
+        rel_parts = os.path.relpath(candidate, project_root).split(os.sep)
+        if any(part.startswith(".") for part in rel_parts):
+            raise WorkspaceError(f"'{relative_path}' нельзя удалить")
+
+    permissions.ensure_ownership_sync(project_root)
+
+    if os.path.islink(literal_path):
+        os.remove(literal_path)
+        return {"relative_path": os.path.relpath(literal_path, project_root)}
+    if os.path.isdir(candidate):
+        shutil.rmtree(candidate)
+    else:
+        os.remove(candidate)
+    return {"relative_path": os.path.relpath(candidate, project_root)}
