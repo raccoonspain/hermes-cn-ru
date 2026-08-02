@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Администрирование — Hermes</title>
+<style>
+  :root{
+    --sky:#12172b; --sky-deep:#0c1020; --panel:#1a2038; --panel-2:#212949;
+    --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
+    --violet:#ad9fe6; --teal:#7fc4b2; --red:#e88980; --dim-star:#727bab;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--sky); color:var(--text);
+    font-family:Georgia,"Iowan Old Style",serif;
+    min-height:100vh; display:grid; grid-template-columns:230px 1fr;
+  }
+  aside{border-right:1px solid var(--panel-line); padding:26px 18px}
+  .brand{font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim)}
+  aside h1{font-size:20px;font-weight:400;font-style:italic;margin:4px 0 26px}
+  nav a{
+    display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:8px;
+    color:var(--text-dim);text-decoration:none;font-size:14px;margin-bottom:2px;
+  }
+  nav a.on{background:var(--panel-2);color:var(--text)}
+  nav a:hover{background:var(--panel)}
+  .back{display:block;margin-top:30px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-dim);text-decoration:none}
+  .back:hover{color:var(--gold)}
+
+  main{padding:32px 40px 60px}
+  h2{font-size:24px;font-weight:400;font-style:italic;margin:0 0 22px}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:36px}
+  .card{background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;padding:18px 20px}
+  .card .lbl{font-family:ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px}
+  .card .big{font-size:26px;font-family:ui-monospace,Consolas,monospace;color:var(--text)}
+  .card .big small{font-size:13px;color:var(--text-dim)}
+  .bar{height:6px;background:var(--sky-deep);border-radius:4px;margin-top:12px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--teal)}
+  .bar.warn i{background:var(--gold)}
+  .bar.danger i{background:var(--red)}
+  .card .sub{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);margin-top:8px}
+
+  .section{margin-bottom:40px}
+  .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .section-head h3{font-size:16px;font-weight:400;font-style:italic;margin:0}
+  .btn{
+    font-family:ui-monospace,Consolas,monospace;font-size:11.5px;background:var(--gold);color:var(--sky-deep);
+    border:none;padding:8px 14px;border-radius:8px;cursor:pointer;
+  }
+
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:11px 16px;font-size:13px;border-bottom:1px solid var(--panel-line)}
+  th{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);font-weight:400}
+  tr:last-child td{border-bottom:none}
+  .badge{font-family:ui-monospace,Consolas,monospace;font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid}
+  .badge.owner{color:var(--gold);border-color:var(--gold)}
+  .badge.member{color:var(--violet);border-color:var(--violet)}
+  .mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-dim)}
+  .row-actions button{
+    background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:6px;
+    padding:4px 9px;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;cursor:pointer;margin-right:4px;
+  }
+  .row-actions button:hover{color:var(--text);border-color:var(--violet)}
+
+  .log{background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;padding:16px 18px}
+  .log-line{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.8;color:var(--text-dim)}
+  .log-line .t{color:var(--dim-star);margin-right:8px}
+  .log-line.err{color:var(--red)}
+  .log-line.ok{color:var(--teal)}
+
+  .overlay{position:fixed;inset:0;background:rgba(6,8,16,.7);display:none;align-items:center;justify-content:center;z-index:10}
+  .overlay.on{display:flex}
+  .modal{width:380px;background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;padding:22px}
+  .modal h3{margin:0 0 16px;font-weight:400;font-style:italic}
+  .modal label{display:block;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);margin:12px 0 5px;text-transform:uppercase;letter-spacing:1px}
+  .modal input,.modal select{width:100%;background:var(--sky-deep);border:1px solid var(--panel-line);border-radius:8px;padding:9px 11px;color:var(--text);font-family:Georgia,serif;font-size:13px}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+  .modal-actions button{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;padding:8px 14px;border-radius:8px;cursor:pointer}
+  .ghost{background:none;color:var(--text-dim);border:1px solid var(--panel-line)}
+</style>
+</head>
+<body>
+
+<aside>
+  <div class="brand">Hermes</div>
+  <h1>Администрирование</h1>
+  <nav>
+    <a class="on">📊 Обзор</a>
+    <a>👥 Пользователи</a>
+    <a>🖥️ VPS и агент</a>
+    <a>🧾 Журнал</a>
+  </nav>
+  <a class="back" href="home.html">🏠 на главную</a>
+  <a class="back" href="project-selector.html">← в проекты</a>
+</aside>
+
+<main>
+  <h2>Обзор</h2>
+
+  <div class="cards">
+    <div class="card" id="cpuCard">
+      <div class="lbl">CPU</div>
+      <div class="big">…</div>
+      <div class="bar"><i style="width:0%"></i></div>
+      <div class="sub">8 vCPU · RU-датацентр</div>
+    </div>
+    <div class="card" id="ramCard">
+      <div class="lbl">RAM</div>
+      <div class="big">…</div>
+      <div class="bar warn"><i style="width:0%"></i></div>
+      <div class="sub">—</div>
+    </div>
+    <div class="card" id="diskCard">
+      <div class="lbl">Диск (NVMe)</div>
+      <div class="big">…</div>
+      <div class="bar"><i style="width:0%"></i></div>
+      <div class="sub">кэш вложений + skills</div>
+    </div>
+    <div class="card" id="sessionsCard">
+      <div class="lbl">Активные сессии</div>
+      <div class="big">…</div>
+      <div class="sub">—</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <h3>Пользователи</h3>
+      <button class="btn" id="createUserBtn">+ создать пользователя</button>
+    </div>
+    <table>
+      <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Проектов</th><th>Последняя активность</th><th></th></tr></thead>
+      <tbody id="usersBody"></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-head"><h3>Журнал (последнее)</h3></div>
+    <div class="log" id="eventsLog"></div>
+  </div>
+</main>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3>Новый пользователь</h3>
+    <label>Имя</label>
+    <input type="text" id="createNameInput" placeholder="например, Глеб">
+    <p style="font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);margin:4px 0 0">
+      имя задаёт администратор — пользователю не нужно ничего придумывать самому, можно поменять в любой момент
+    </p>
+    <label>Логин</label>
+    <input type="text" id="createLoginInput" placeholder="gleb">
+    <p style="font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);margin:4px 0 0">
+      строчные латинские буквы, цифры, "_", "-" — станет именем рабочей папки, после создания не меняется
+    </p>
+    <label>Пароль</label>
+    <input type="password" id="createPasswordInput" placeholder="пароль для входа">
+    <label>Роль</label>
+    <select id="createRoleSelect"><option value="participant">участник</option><option value="owner">владелец</option></select>
+    <div class="modal-actions">
+      <button class="ghost" id="createCancelBtn">Отмена</button>
+      <button class="btn" id="createSaveBtn">Создать</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="editOverlay">
+  <div class="modal">
+    <h3>Изменить пользователя</h3>
+    <label>Имя</label>
+    <input type="text" id="editNameInput">
+    <label>Логин</label>
+    <div class="mono" id="editLoginText" style="padding:9px 0"></div>
+    <label>Роль</label>
+    <select id="editRoleSelect"><option value="participant">участник</option><option value="owner">владелец</option></select>
+    <div class="modal-actions">
+      <button class="ghost" id="editCancelBtn">Отмена</button>
+      <button class="btn" id="editSaveBtn">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="resetOverlay">
+  <div class="modal">
+    <h3>Сброс пароля</h3>
+    <label>Новый пароль</label>
+    <input type="password" id="resetPasswordInput" placeholder="новый пароль для входа">
+    <div class="modal-actions">
+      <button class="ghost" id="resetCancelBtn">Отмена</button>
+      <button class="btn" id="resetSaveBtn">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+function fmtBytes(bytes) {
+  if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(1) + ' GB';
+  if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(0) + ' MB';
+  return bytes + ' B';
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleString('ru-RU');
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+const EVENT_LABELS = {
+  'login': 'вход',
+  'project.create': 'создал проект',
+  'project.delete': 'удалил проект',
+  'chat.start': 'начал чат',
+  'user.create': 'создал пользователя',
+  'user.update': 'изменил пользователя',
+  'user.reset_password': 'сбросил пароль',
+};
+
+async function loadOverview() {
+  const resp = await apiFetch('/api/admin/overview');
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (resp.status === 403) { location.href = 'home.html'; return; }
+  const data = await resp.json();
+
+  document.querySelector('#cpuCard .big').textContent = data.cpu_percent + '%';
+  document.querySelector('#cpuCard .bar i').style.width = Math.min(100, data.cpu_percent) + '%';
+
+  const ramPct = data.ram.total_bytes ? Math.round(data.ram.used_bytes / data.ram.total_bytes * 100) : 0;
+  document.querySelector('#ramCard .big').textContent = `${fmtBytes(data.ram.used_bytes)} / ${fmtBytes(data.ram.total_bytes)}`;
+  document.querySelector('#ramCard .bar i').style.width = ramPct + '%';
+  document.querySelector('#ramCard .sub').textContent = `${ramPct}% занято`;
+
+  const diskPct = data.disk.total_bytes ? Math.round(data.disk.used_bytes / data.disk.total_bytes * 100) : 0;
+  document.querySelector('#diskCard .big').textContent = `${fmtBytes(data.disk.used_bytes)} / ${fmtBytes(data.disk.total_bytes)}`;
+  document.querySelector('#diskCard .bar i').style.width = diskPct + '%';
+
+  document.querySelector('#sessionsCard .big').textContent = data.active_sessions;
+  document.querySelector('#sessionsCard .sub').textContent = `${data.active_users} пользователей онлайн`;
+}
+
+let editingUsername = null;
+let resettingUsername = null;
+
+async function loadUsers() {
+  const resp = await apiFetch('/api/admin/users');
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (resp.status === 403) { location.href = 'home.html'; return; }
+  const data = await resp.json();
+
+  const tbody = document.getElementById('usersBody');
+  tbody.innerHTML = '';
+  for (const u of data.users) {
+    const tr = document.createElement('tr');
+    const roleLabel = u.role === 'owner' ? 'владелец' : 'участник';
+    const badgeClass = u.role === 'owner' ? 'owner' : 'member';
+    tr.innerHTML = `
+      <td>${escapeHtml(u.display_name)}</td>
+      <td class="mono">${escapeHtml(u.username)}</td>
+      <td><span class="badge ${badgeClass}">${roleLabel}</span></td>
+      <td>${u.project_count}</td>
+      <td class="mono">${fmtTime(u.last_active)}</td>
+      <td class="row-actions"></td>
+    `;
+    const actionsCell = tr.querySelector('.row-actions');
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'изменить';
+    editBtn.addEventListener('click', () => openEditModal(u));
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'сброс пароля';
+    resetBtn.addEventListener('click', () => openResetModal(u.username));
+    actionsCell.append(editBtn, resetBtn);
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadEvents() {
+  const resp = await apiFetch('/api/admin/events?limit=50');
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (resp.status === 403) { location.href = 'home.html'; return; }
+  const data = await resp.json();
+
+  const log = document.getElementById('eventsLog');
+  log.innerHTML = '';
+  for (const ev of data.events) {
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    const label = EVENT_LABELS[ev.verb] || ev.verb;
+    const detail = ev.detail ? `: ${escapeHtml(ev.detail)}` : '';
+    div.innerHTML = `<span class="t">${fmtTime(ev.ts)}</span>${escapeHtml(ev.actor)} → ${escapeHtml(label)}${detail}`;
+    log.appendChild(div);
+  }
+}
+
+function openEditModal(u) {
+  editingUsername = u.username;
+  document.getElementById('editNameInput').value = u.display_name;
+  document.getElementById('editLoginText').textContent = u.username;
+  document.getElementById('editRoleSelect').value = u.role;
+  document.getElementById('editOverlay').classList.add('on');
+}
+
+function openResetModal(username) {
+  resettingUsername = username;
+  document.getElementById('resetPasswordInput').value = '';
+  document.getElementById('resetOverlay').classList.add('on');
+}
+
+document.getElementById('createUserBtn').addEventListener('click', () => {
+  document.getElementById('createNameInput').value = '';
+  document.getElementById('createLoginInput').value = '';
+  document.getElementById('createPasswordInput').value = '';
+  document.getElementById('createRoleSelect').value = 'participant';
+  document.getElementById('overlay').classList.add('on');
+});
+
+document.getElementById('createCancelBtn').addEventListener('click', () => {
+  document.getElementById('overlay').classList.remove('on');
+});
+
+document.getElementById('createSaveBtn').addEventListener('click', async () => {
+  const payload = {
+    username: document.getElementById('createLoginInput').value.trim(),
+    display_name: document.getElementById('createNameInput').value.trim(),
+    role: document.getElementById('createRoleSelect').value,
+    password: document.getElementById('createPasswordInput').value,
+  };
+  const resp = await apiFetch('/api/admin/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    alert('Не удалось создать пользователя: ' + (body.error || resp.status));
+    return;
+  }
+  document.getElementById('overlay').classList.remove('on');
+  await loadUsers();
+});
+
+document.getElementById('editCancelBtn').addEventListener('click', () => {
+  document.getElementById('editOverlay').classList.remove('on');
+});
+
+document.getElementById('editSaveBtn').addEventListener('click', async () => {
+  const payload = {
+    display_name: document.getElementById('editNameInput').value.trim(),
+    role: document.getElementById('editRoleSelect').value,
+  };
+  const resp = await apiFetch('/api/admin/users/' + encodeURIComponent(editingUsername), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    alert('Не удалось сохранить: ' + (body.error || resp.status));
+    return;
+  }
+  document.getElementById('editOverlay').classList.remove('on');
+  await loadUsers();
+});
+
+document.getElementById('resetCancelBtn').addEventListener('click', () => {
+  document.getElementById('resetOverlay').classList.remove('on');
+});
+
+document.getElementById('resetSaveBtn').addEventListener('click', async () => {
+  const password = document.getElementById('resetPasswordInput').value;
+  const resp = await apiFetch('/api/admin/users/' + encodeURIComponent(resettingUsername) + '/reset-password', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }),
+  });
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    alert('Не удалось сбросить пароль: ' + (body.error || resp.status));
+    return;
+  }
+  document.getElementById('resetOverlay').classList.remove('on');
+  alert('Пароль обновлён');
+});
+
+(async () => {
+  const me = await requireAuth();
+  if (!me) return;
+  if (me.role !== 'owner') { location.href = 'home.html'; return; }
+  await Promise.all([loadOverview(), loadUsers(), loadEvents()]);
+})();
+</script>
+
+</body>
+</html>
