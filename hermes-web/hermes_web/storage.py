@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -56,6 +57,17 @@ def init_db(conn: sqlite3.Connection) -> None:
             pinned INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             PRIMARY KEY (user, slug)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts REAL NOT NULL,
+            actor TEXT NOT NULL,
+            verb TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT ''
         )
         """
     )
@@ -160,3 +172,52 @@ def update_chat_session_project_path(conn: sqlite3.Connection, old_path: str, ne
         "UPDATE chat_sessions SET project_path = ? WHERE project_path = ?", (new_path, old_path)
     )
     conn.commit()
+
+
+def list_users(conn: sqlite3.Connection) -> list:
+    rows = conn.execute("SELECT username, role, display_name FROM users ORDER BY username").fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_user(conn: sqlite3.Connection, username: str, display_name: str, role: str) -> None:
+    conn.execute(
+        "UPDATE users SET display_name = ?, role = ? WHERE username = ?",
+        (display_name, role, username),
+    )
+    conn.commit()
+
+
+def update_user_password(conn: sqlite3.Connection, username: str, password_hash: str) -> None:
+    conn.execute("UPDATE users SET password_hash = ? WHERE username = ?", (password_hash, username))
+    conn.commit()
+
+
+def count_active_sessions(conn: sqlite3.Connection, now: float) -> dict:
+    row = conn.execute(
+        "SELECT COUNT(*) AS sessions, COUNT(DISTINCT username) AS users FROM web_sessions WHERE expires_at > ?",
+        (now,),
+    ).fetchone()
+    return {"sessions": row["sessions"], "users": row["users"]}
+
+
+def get_last_activity(conn: sqlite3.Connection, user: str) -> Optional[float]:
+    row = conn.execute(
+        "SELECT MAX(COALESCE(last_message_at, created_at)) AS last_active FROM chat_sessions WHERE user = ?",
+        (user,),
+    ).fetchone()
+    return row["last_active"]
+
+
+def log_event(conn: sqlite3.Connection, actor: str, verb: str, detail: str = "") -> None:
+    conn.execute(
+        "INSERT INTO events (ts, actor, verb, detail) VALUES (?, ?, ?, ?)",
+        (time.time(), actor, verb, detail),
+    )
+    conn.commit()
+
+
+def list_events(conn: sqlite3.Connection, limit: int = 50) -> list:
+    rows = conn.execute(
+        "SELECT ts, actor, verb, detail FROM events ORDER BY id DESC LIMIT ?", (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
