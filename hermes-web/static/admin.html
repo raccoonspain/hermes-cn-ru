@@ -88,24 +88,23 @@
   <div class="brand">Hermes</div>
   <h1>Администрирование</h1>
   <nav>
-    <a class="on">📊 Обзор</a>
-    <a>👥 Пользователи</a>
-    <a>🖥️ VPS и агент</a>
-    <a>🧾 Журнал</a>
+    <a class="on" href="#overview">📊 Обзор</a>
+    <a href="#users">👥 Пользователи</a>
+    <a href="#events">🧾 Журнал</a>
   </nav>
   <a class="back" href="home.html">🏠 на главную</a>
   <a class="back" href="project-selector.html">← в проекты</a>
 </aside>
 
 <main>
-  <h2>Обзор</h2>
+  <h2 id="overview">Обзор</h2>
 
   <div class="cards">
     <div class="card" id="cpuCard">
       <div class="lbl">CPU</div>
       <div class="big">…</div>
       <div class="bar"><i style="width:0%"></i></div>
-      <div class="sub">8 vCPU · RU-датацентр</div>
+      <div class="sub">загрузка CPU</div>
     </div>
     <div class="card" id="ramCard">
       <div class="lbl">RAM</div>
@@ -117,7 +116,7 @@
       <div class="lbl">Диск (NVMe)</div>
       <div class="big">…</div>
       <div class="bar"><i style="width:0%"></i></div>
-      <div class="sub">кэш вложений + skills</div>
+      <div class="sub">диск (workspace)</div>
     </div>
     <div class="card" id="sessionsCard">
       <div class="lbl">Активные сессии</div>
@@ -126,7 +125,7 @@
     </div>
   </div>
 
-  <div class="section">
+  <div class="section" id="users">
     <div class="section-head">
       <h3>Пользователи</h3>
       <button class="btn" id="createUserBtn">+ создать пользователя</button>
@@ -137,7 +136,7 @@
     </table>
   </div>
 
-  <div class="section">
+  <div class="section" id="events">
     <div class="section-head"><h3>Журнал (последнее)</h3></div>
     <div class="log" id="eventsLog"></div>
   </div>
@@ -224,26 +223,67 @@ const EVENT_LABELS = {
   'user.reset_password': 'сбросил пароль',
 };
 
+function showOverviewError() {
+  for (const id of ['cpuCard', 'ramCard', 'diskCard', 'sessionsCard']) {
+    const card = document.getElementById(id);
+    card.querySelector('.big').textContent = 'ошибка';
+    const sub = card.querySelector('.sub');
+    if (sub) sub.textContent = 'нет данных';
+  }
+}
+
 async function loadOverview() {
-  const resp = await apiFetch('/api/admin/overview');
+  let resp;
+  try {
+    resp = await apiFetch('/api/admin/overview');
+  } catch (err) {
+    showOverviewError();
+    return;
+  }
   if (resp.status === 401) { location.href = 'login.html'; return; }
   if (resp.status === 403) { location.href = 'home.html'; return; }
-  const data = await resp.json();
+  if (!resp.ok) { showOverviewError(); return; }
 
-  document.querySelector('#cpuCard .big').textContent = data.cpu_percent + '%';
-  document.querySelector('#cpuCard .bar i').style.width = Math.min(100, data.cpu_percent) + '%';
+  let data;
+  try {
+    data = await resp.json();
+  } catch (err) {
+    showOverviewError();
+    return;
+  }
 
-  const ramPct = data.ram.total_bytes ? Math.round(data.ram.used_bytes / data.ram.total_bytes * 100) : 0;
-  document.querySelector('#ramCard .big').textContent = `${fmtBytes(data.ram.used_bytes)} / ${fmtBytes(data.ram.total_bytes)}`;
-  document.querySelector('#ramCard .bar i').style.width = ramPct + '%';
-  document.querySelector('#ramCard .sub').textContent = `${ramPct}% занято`;
+  if (data.cpu_percent === null || data.cpu_percent === undefined) {
+    document.querySelector('#cpuCard .big').textContent = 'нет данных';
+  } else {
+    document.querySelector('#cpuCard .big').textContent = data.cpu_percent + '%';
+    document.querySelector('#cpuCard .bar i').style.width = Math.min(100, data.cpu_percent) + '%';
+  }
 
-  const diskPct = data.disk.total_bytes ? Math.round(data.disk.used_bytes / data.disk.total_bytes * 100) : 0;
-  document.querySelector('#diskCard .big').textContent = `${fmtBytes(data.disk.used_bytes)} / ${fmtBytes(data.disk.total_bytes)}`;
-  document.querySelector('#diskCard .bar i').style.width = diskPct + '%';
+  if (data.ram) {
+    const ramPct = data.ram.total_bytes ? Math.round(data.ram.used_bytes / data.ram.total_bytes * 100) : 0;
+    document.querySelector('#ramCard .big').textContent = `${fmtBytes(data.ram.used_bytes)} / ${fmtBytes(data.ram.total_bytes)}`;
+    document.querySelector('#ramCard .bar i').style.width = ramPct + '%';
+    document.querySelector('#ramCard .sub').textContent = `${ramPct}% занято`;
+  } else {
+    document.querySelector('#ramCard .big').textContent = 'нет данных';
+    document.querySelector('#ramCard .sub').textContent = '—';
+  }
 
-  document.querySelector('#sessionsCard .big').textContent = data.active_sessions;
-  document.querySelector('#sessionsCard .sub').textContent = `${data.active_users} пользователей онлайн`;
+  if (data.disk) {
+    const diskPct = data.disk.total_bytes ? Math.round(data.disk.used_bytes / data.disk.total_bytes * 100) : 0;
+    document.querySelector('#diskCard .big').textContent = `${fmtBytes(data.disk.used_bytes)} / ${fmtBytes(data.disk.total_bytes)}`;
+    document.querySelector('#diskCard .bar i').style.width = diskPct + '%';
+  } else {
+    document.querySelector('#diskCard .big').textContent = 'нет данных';
+  }
+
+  if (data.active_sessions === null || data.active_sessions === undefined) {
+    document.querySelector('#sessionsCard .big').textContent = 'нет данных';
+    document.querySelector('#sessionsCard .sub').textContent = '—';
+  } else {
+    document.querySelector('#sessionsCard .big').textContent = data.active_sessions;
+    document.querySelector('#sessionsCard .sub').textContent = `${data.active_users} вошли за последние 30 дней`;
+  }
 }
 
 let editingUsername = null;
@@ -343,6 +383,7 @@ document.getElementById('createSaveBtn').addEventListener('click', async () => {
   }
   document.getElementById('overlay').classList.remove('on');
   await loadUsers();
+  await loadEvents();
 });
 
 document.getElementById('editCancelBtn').addEventListener('click', () => {
@@ -365,6 +406,7 @@ document.getElementById('editSaveBtn').addEventListener('click', async () => {
   }
   document.getElementById('editOverlay').classList.remove('on');
   await loadUsers();
+  await loadEvents();
 });
 
 document.getElementById('resetCancelBtn').addEventListener('click', () => {
@@ -383,6 +425,7 @@ document.getElementById('resetSaveBtn').addEventListener('click', async () => {
     return;
   }
   document.getElementById('resetOverlay').classList.remove('on');
+  await loadEvents();
   alert('Пароль обновлён');
 });
 
@@ -390,7 +433,10 @@ document.getElementById('resetSaveBtn').addEventListener('click', async () => {
   const me = await requireAuth();
   if (!me) return;
   if (me.role !== 'owner') { location.href = 'home.html'; return; }
-  await Promise.all([loadOverview(), loadUsers(), loadEvents()]);
+  await Promise.all([loadOverview(), loadUsers(), loadEvents()]).catch((err) => {
+    console.error('admin panel: не удалось загрузить данные', err);
+    showOverviewError();
+  });
 })();
 </script>
 

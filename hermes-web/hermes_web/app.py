@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -16,6 +17,8 @@ import aiohttp
 from aiohttp import web
 
 from . import admin_metrics, auth, hermes_client, projects, quickchat, storage, workspace
+
+logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "hermes_web_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 дней
@@ -493,18 +496,63 @@ async def handle_admin_overview(request: web.Request) -> web.Response:
     # (см. projects.create_group). shutil.disk_usage (внутри
     # admin_metrics.disk_usage) требует существующий путь, а овнер может
     # открыть админ-панель раньше, чем кто-либо создаст первый проект.
-    os.makedirs(workspace_root, exist_ok=True)
-    cpu = await admin_metrics.cpu_percent()
-    ram = admin_metrics.ram_usage()
-    disk = admin_metrics.disk_usage(workspace_root)
-    active = storage.count_active_sessions(request.app["db"], now=time.time())
-    return web.json_response({
+    #
+    # Каждая метрика собирается независимо и в своём try/except: это
+    # единственный экран для диагностики здоровья сервера, поэтому один
+    # упавший источник (нечитаемый /proc, недоступный для записи путь,
+    # неожиданный формат /proc/meminfo) не должен превращать весь ответ
+    # в 500 с телом-не-JSON и молча вешать фронтенд на "…" навсегда —
+    # см. финальное ревью под-проекта C, Important #1.
+    errors: dict = {}
+
+    try:
+        os.makedirs(workspace_root, exist_ok=True)
+    except OSError:
+        logger.warning("не удалось создать workspace_root %s", workspace_root, exc_info=True)
+        errors["disk"] = "workspace_root недоступен"
+
+    cpu = None
+    try:
+        cpu = await admin_metrics.cpu_percent()
+    except Exception:
+        logger.warning("не удалось собрать метрику CPU", exc_info=True)
+        errors["cpu"] = "не удалось прочитать /proc/stat"
+
+    ram = None
+    try:
+        ram = admin_metrics.ram_usage()
+    except Exception:
+        logger.warning("не удалось собрать метрику RAM", exc_info=True)
+        errors["ram"] = "не удалось прочитать /proc/meminfo"
+
+    disk = None
+    if "disk" not in errors:
+        try:
+            disk = admin_metrics.disk_usage(workspace_root)
+        except Exception:
+            logger.warning("не удалось собрать метрику диска для %s", workspace_root, exc_info=True)
+            errors["disk"] = "не удалось прочитать диск"
+
+    active_sessions = None
+    active_users = None
+    try:
+        active = storage.count_active_sessions(request.app["db"], now=time.time())
+        active_sessions = active["sessions"]
+        active_users = active["users"]
+    except Exception:
+        logger.warning("не удалось посчитать активные сессии", exc_info=True)
+        errors["sessions"] = "не удалось посчитать активные сессии"
+
+    payload = {
         "cpu_percent": cpu,
         "ram": ram,
         "disk": disk,
-        "active_sessions": active["sessions"],
-        "active_users": active["users"],
-    })
+        "active_sessions": active_sessions,
+        "active_users": active_users,
+    }
+    if errors:
+        payload["errors"] = errors
+    return web.json_response(payload)
 
 
 async def handle_admin_list_users(request: web.Request) -> web.Response:

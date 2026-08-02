@@ -1,6 +1,6 @@
 import pytest
 
-from hermes_web import auth, quickchat, storage
+from hermes_web import admin_metrics, auth, quickchat, storage
 from hermes_web.app import create_app
 
 
@@ -56,6 +56,54 @@ async def test_overview_returns_metrics_for_owner(aiohttp_client, app_and_conn):
     assert set(body["disk"]) == {"used_bytes", "total_bytes", "path"}
     assert body["active_sessions"] >= 1
     assert body["active_users"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_overview_degrades_gracefully_when_cpu_metric_raises(aiohttp_client, app_and_conn, monkeypatch):
+    async def boom(*args, **kwargs):
+        raise OSError("не удалось прочитать /proc/stat")
+
+    monkeypatch.setattr(admin_metrics, "cpu_percent", boom)
+
+    client = await aiohttp_client(app_and_conn)
+    await _login(client, "dem", "secret123")
+    resp = await client.get("/api/admin/overview")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["cpu_percent"] is None
+    assert "cpu" in body.get("errors", {})
+    # Остальные метрики, не затронутые сбоем, всё равно приходят нормально.
+    assert set(body["ram"]) == {"used_bytes", "total_bytes"}
+    assert set(body["disk"]) == {"used_bytes", "total_bytes", "path"}
+    assert body["active_sessions"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_overview_degrades_gracefully_when_all_metrics_raise(aiohttp_client, app_and_conn, monkeypatch):
+    async def boom_cpu(*args, **kwargs):
+        raise OSError("boom cpu")
+
+    def boom_ram(*args, **kwargs):
+        raise OSError("boom ram")
+
+    def boom_disk(*args, **kwargs):
+        raise OSError("boom disk")
+
+    monkeypatch.setattr(admin_metrics, "cpu_percent", boom_cpu)
+    monkeypatch.setattr(admin_metrics, "ram_usage", boom_ram)
+    monkeypatch.setattr(admin_metrics, "disk_usage", boom_disk)
+
+    client = await aiohttp_client(app_and_conn)
+    await _login(client, "dem", "secret123")
+    resp = await client.get("/api/admin/overview")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["cpu_percent"] is None
+    assert body["ram"] is None
+    assert body["disk"] is None
+    assert set(body["errors"]) == {"cpu", "ram", "disk"}
+    # Активные сессии не зависят от metrics-модуля — должны прийти как обычно.
+    assert body["active_sessions"] >= 1
 
 
 @pytest.mark.asyncio
