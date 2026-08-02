@@ -8,7 +8,7 @@
   :root{
     --sky:#12172b; --sky-deep:#0c1020; --panel:#1a2038; --panel-2:#212949;
     --panel-line:#3c4568; --text:#f8f6ef; --text-dim:#aeb7dc; --gold:#f0bb5c;
-    --violet:#ad9fe6; --teal:#7fc4b2; --dim-star:#727bab;
+    --violet:#ad9fe6; --teal:#7fc4b2; --dim-star:#727bab; --red:#e88980;
     --c-source:#ad9fe6; --c-outer:#7fc4b2; --c-result:#f0bb5c; --c-misc:#8b93bf;
   }
   *{box-sizing:border-box}
@@ -45,6 +45,8 @@
   .node .fcount{font-size:10px;color:var(--text-dim)}
   .move-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
   .move-btn:hover{color:var(--text);border-color:var(--violet)}
+  .delete-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
+  .delete-btn:hover{color:var(--red);border-color:var(--red)}
   .node{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-dim)}
   .node:hover{background:var(--panel);color:var(--text)}
   .node .ic{width:15px;text-align:center;flex-shrink:0;font-size:12px}
@@ -512,6 +514,7 @@ function renderFolderNode(node, bucketClass, depth) {
     html += `<div class="node folder-${bucketClass}" style="padding-left:${depth * 14}px" data-toggle-path="${escapeHtml(child.path)}">
       <span class="tri">${expanded ? '▼' : '▶'}</span><span class="ic">📁</span><span class="name">${escapeHtml(name)}</span>${hiddenCount ? ` <span class="fcount">(${hiddenCount})</span>` : ''}
       <button class="move-btn" data-move="${escapeHtml(child.realPath ?? child.path)}" title="переместить">→</button>
+      <button class="delete-btn" data-delete="${escapeHtml(child.realPath ?? child.path)}" data-delete-kind="folder" title="удалить">🗑</button>
       ${canCreate ? `<button class="new-folder-btn" data-parent="${escapeHtml(child.path)}" title="новая папка">＋</button>` : ''}
     </div>`;
     if (expanded) html += renderFolderNode(child, bucketClass, depth + 1);
@@ -520,6 +523,7 @@ function renderFolderNode(node, bucketClass, depth) {
     html += `<div class="node file folder-${bucketClass}" style="padding-left:${depth * 14 + 20}px" data-relpath="${escapeHtml(f.entry.relative_path)}">
       <span class="ic">${iconFor(f.name)}</span><span class="name">${escapeHtml(f.name)}</span>
       <button class="move-btn" data-move="${escapeHtml(f.entry.relative_path)}" title="переместить">→</button>
+      <button class="delete-btn" data-delete="${escapeHtml(f.entry.relative_path)}" data-delete-kind="file" title="удалить">🗑</button>
     </div>`;
   });
   return html;
@@ -556,6 +560,9 @@ function renderTree(tree) {
   });
   document.querySelectorAll('.tree [data-move]').forEach(btn => {
     btn.addEventListener('click', (e) => { e.stopPropagation(); moveEntry(btn.dataset.move); });
+  });
+  document.querySelectorAll('.tree [data-delete]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); deleteEntry(btn.dataset.delete, btn.dataset.deleteKind === 'folder'); });
   });
   document.querySelectorAll('.tree [data-toggle-path]').forEach(row => {
     row.addEventListener('click', () => {
@@ -688,6 +695,30 @@ async function saveEditor(relpath) {
 function moveEntryDefaultDestDir(relpath) {
   const idx = relpath.lastIndexOf('/');
   return idx === -1 ? '.' : relpath.slice(0, idx);
+}
+
+async function deleteEntry(relpath, isFolder) {
+  const name = relpath.split('/').pop();
+  const msg = isFolder
+    ? `Удалить папку «${name}» со всем содержимым безвозвратно?`
+    : `Удалить файл «${name}» безвозвратно?`;
+  if (!confirm(msg)) return;
+  const resp = await apiFetch('/api/projects/delete-entry', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: projectPath, relative_path: relpath }),
+  });
+  if (resp.status === 401) { location.href = 'login.html'; return; }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    alert('Не удалось удалить: ' + (body.error || resp.status));
+    return;
+  }
+  if (currentEditorFile === relpath) {
+    closeEditorPane();
+    currentEditorFile = null;
+    editorDirty = false;
+  }
+  await refreshTreeAndFiles();
 }
 
 async function moveEntry(relpath) {
