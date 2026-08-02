@@ -713,7 +713,7 @@ async function deleteEntry(relpath, isFolder) {
     alert('Не удалось удалить: ' + (body.error || resp.status));
     return;
   }
-  if (currentEditorFile === relpath) {
+  if (currentEditorFile === relpath || (currentEditorFile && currentEditorFile.startsWith(relpath + '/'))) {
     closeEditorPane();
     currentEditorFile = null;
     editorDirty = false;
