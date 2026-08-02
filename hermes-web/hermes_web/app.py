@@ -67,6 +67,7 @@ async def handle_login(request: web.Request) -> web.Response:
 
     token = auth.generate_session_token()
     storage.create_web_session(request.app["db"], token, username, expires_at=time.time() + SESSION_TTL_SECONDS)
+    storage.log_event(request.app["db"], user_row["username"], "login", "")
 
     response = web.json_response({
         "username": user_row["username"],
@@ -237,6 +238,7 @@ async def handle_create_project(request: web.Request) -> web.Response:
         result = await quickchat.create_project(request.app["db"], request.app["quickchat_config"], user["username"], group, title)
     except quickchat.QuickChatError as exc:
         return web.json_response({"error": str(exc)}, status=400)
+    storage.log_event(request.app["db"], user["username"], "project.create", result["project_path"])
     return web.json_response(result)
 
 
@@ -300,6 +302,7 @@ async def handle_delete_project(request: web.Request) -> web.Response:
         result = await projects.delete_project(user["username"], path, request.app["quickchat_config"], request.app["db"])
     except projects.project_index_core.ProjectIndexError as exc:
         return web.json_response({"error": str(exc)}, status=400)
+    storage.log_event(request.app["db"], user["username"], "project.delete", result["old_path"])
     return web.json_response(result)
 
 

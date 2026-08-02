@@ -248,6 +248,7 @@ async def create_quick_chat(db_conn, http_session, config: Config, user: str) ->
     storage.create_chat_session(
         db_conn, chat_session_id, user, index_result["path"], hermes_session_id, created_at=time.time(),
     )
+    storage.log_event(db_conn, user, "chat.start", index_result["path"])
 
     return {
         "chat_session_id": chat_session_id,
@@ -274,6 +275,7 @@ async def get_or_open_session(db_conn, http_session, config: Config, user: str, 
     hermes_session_id = await _new_hermes_session(http_session, config)
     chat_session_id = uuid.uuid4().hex
     storage.create_chat_session(db_conn, chat_session_id, user, resolved, hermes_session_id, created_at=time.time())
+    storage.log_event(db_conn, user, "chat.start", resolved)
     return {"chat_session_id": chat_session_id, "project_path": resolved, "hermes_session_id": hermes_session_id}
 
 

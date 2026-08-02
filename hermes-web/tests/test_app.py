@@ -52,6 +52,15 @@ async def test_login_success_sets_cookie_and_returns_role(aiohttp_client, app_an
 
 
 @pytest.mark.asyncio
+async def test_login_success_logs_event(aiohttp_client, app_and_conn):
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    events = storage.list_events(app_and_conn["db"])
+    assert len(events) == 1
+    assert events[0] == {"ts": events[0]["ts"], "actor": "dem", "verb": "login", "detail": ""}
+
+
+@pytest.mark.asyncio
 async def test_me_without_cookie_returns_401(aiohttp_client, app_and_conn):
     client = await aiohttp_client(app_and_conn)
     resp = await client.get("/api/me")
@@ -997,6 +1006,24 @@ async def test_delete_project_success(aiohttp_client, app_and_conn, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_delete_project_logs_event(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_delete_project(user, path, config, db_conn):
+        return {"old_path": path, "trashed_path": path + ".trash"}
+
+    monkeypatch.setattr("hermes_web.app.projects.delete_project", fake_delete_project)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects/delete", json={"path": "/w/dem/ALL/x"})
+    assert resp.status == 200
+
+    events = [e for e in storage.list_events(app_and_conn["db"]) if e["verb"] == "project.delete"]
+    assert len(events) == 1
+    assert events[0]["actor"] == "dem"
+    assert events[0]["detail"] == "/w/dem/ALL/x"
+
+
+@pytest.mark.asyncio
 async def test_delete_project_not_a_project_returns_400(aiohttp_client, app_and_conn, monkeypatch):
     async def fake_delete_project(user, path, config, db_conn):
         raise projects.project_index_core.ProjectIndexError("не проект (нет about.md)")
@@ -1029,6 +1056,24 @@ async def test_create_project_success(aiohttp_client, app_and_conn, monkeypatch)
     assert resp.status == 200
     body = await resp.json()
     assert body["project_path"] == "/w/dem/1С/novyy-proekt"
+
+
+@pytest.mark.asyncio
+async def test_create_project_logs_event(aiohttp_client, app_and_conn, monkeypatch):
+    async def fake_create_project(db_conn, config, user, group, title):
+        return {"project_path": "/w/dem/ALL/новая-тема", "group": group}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.create_project", fake_create_project)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/projects", json={"group": "ALL", "title": "Новая тема"})
+    assert resp.status == 200
+
+    events = [e for e in storage.list_events(app_and_conn["db"]) if e["verb"] == "project.create"]
+    assert len(events) == 1
+    assert events[0]["actor"] == "dem"
+    assert events[0]["detail"] == "/w/dem/ALL/новая-тема"
 
 
 @pytest.mark.asyncio

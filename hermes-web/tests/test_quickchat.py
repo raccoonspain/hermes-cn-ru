@@ -58,6 +58,25 @@ async def test_create_quick_chat_creates_project_and_hermes_session(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_create_quick_chat_logs_chat_start_event(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    result = await quickchat.create_quick_chat(conn, http_session=None, config=config, user="dem")
+
+    events = storage.list_events(conn)
+    assert len(events) == 1
+    assert events[0]["actor"] == "dem"
+    assert events[0]["verb"] == "chat.start"
+    assert events[0]["detail"] == result["project_path"]
+
+
+@pytest.mark.asyncio
 async def test_create_quick_chat_leaves_no_orphan_project_when_hermes_session_fails(tmp_path, monkeypatch):
     # finding 7 финального ревью: раньше каталог проекта + about.md +
     # запись в project_index заводились ДО hermes_client.create_session —
@@ -478,6 +497,32 @@ async def test_get_or_open_session_creates_new_session_for_existing_project(tmp_
     assert result["hermes_session_id"] == created_sessions[0]
     row = storage.get_chat_session(conn, result["chat_session_id"])
     assert row["project_path"] == str(project_dir)
+
+
+@pytest.mark.asyncio
+async def test_get_or_open_session_logs_chat_start_only_once(tmp_path, monkeypatch):
+    conn = storage.get_connection(str(tmp_path / "hermes-web.db"))
+    config = _config(tmp_path)
+
+    session_counter = {"n": 0}
+
+    async def fake_create_session(http_session, base_url, api_key, session_id):
+        session_counter["n"] += 1
+        return {"session": {"id": session_id}}
+
+    monkeypatch.setattr(quickchat.hermes_client, "create_session", fake_create_session)
+
+    created = await quickchat.create_project(conn, config, "dem", "ALL", "Тест")
+    project_path = created["project_path"]
+
+    # create_project не заводит чат-сессию сам — первый get_or_open_session
+    # на этот проект должен залогировать ровно одно событие chat.start.
+    await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path=project_path)
+    await quickchat.get_or_open_session(conn, http_session=None, config=config, user="dem", project_path=project_path)
+
+    events = [e for e in storage.list_events(conn) if e["verb"] == "chat.start"]
+    assert len(events) == 1
+    assert events[0]["detail"] == project_path
 
 
 @pytest.mark.asyncio
