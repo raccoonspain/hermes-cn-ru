@@ -956,7 +956,11 @@ function initLayout() {
 
   makeResizable(document.getElementById('treeHandle'), treePane, { min: 140, max: 360, storageKey: 'hermes.workspace.treeWidth' });
   makeResizable(document.getElementById('sideHandle'), side, { min: 180, max: 420, storageKey: 'hermes.workspace.sideWidth', invert: true });
-  makeResizable(document.getElementById('editorHandle'), editorPane, { min: 220, max: 560, storageKey: 'hermes.workspace.editorWidth' });
+  // Пользователь попросил живьём (2026-08-02): 560px мало, хочет тянуть
+  // минимум до половины рабочей области — считаем потолок от реальной
+  // ширины .body-row на момент загрузки, не только от фиксированного 560.
+  const editorMaxWidth = Math.max(560, document.querySelector('.body-row').clientWidth * 0.5);
+  makeResizable(document.getElementById('editorHandle'), editorPane, { min: 220, max: editorMaxWidth, storageKey: 'hermes.workspace.editorWidth' });
 
   collapsePane(document.getElementById('toggleTreeBtn'), treePane, { storageKey: 'hermes.workspace.treeCollapsed' });
   collapsePane(document.getElementById('toggleSideBtn'), side, { storageKey: 'hermes.workspace.sideCollapsed' });
