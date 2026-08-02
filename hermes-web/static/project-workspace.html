@@ -620,7 +620,10 @@ async function refreshTreeAndFiles() {
 }
 
 function showEditorPane() {
-  document.getElementById('editorPane').style.display = 'flex';
+  const pane = document.getElementById('editorPane');
+  const savedWidth = localStorage.getItem('hermes.workspace.editorWidth');
+  pane.style.width = (savedWidth ? Number(savedWidth) : 320) + 'px';
+  pane.style.display = 'flex';
 }
 
 function closeEditorPane() {
@@ -889,6 +892,61 @@ document.querySelectorAll('.side-tabs button').forEach(b => {
     document.getElementById('pane-' + b.dataset.tab).classList.add('on');
   });
 });
+
+function makeResizable(handleEl, paneEl, { min, max, storageKey, invert }) {
+  let dragging = false, startX = 0, startWidth = 0;
+  function onMove(e) {
+    if (!dragging) return;
+    const delta = (e.clientX - startX) * (invert ? -1 : 1);
+    paneEl.style.width = Math.min(max, Math.max(min, startWidth + delta)) + 'px';
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    handleEl.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    localStorage.setItem(storageKey, parseInt(paneEl.style.width, 10));
+  }
+  handleEl.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startX = e.clientX;
+    startWidth = paneEl.getBoundingClientRect().width;
+    handleEl.classList.add('dragging');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
+}
+
+function collapsePane(btnEl, paneEl, { storageKey }) {
+  function setCollapsed(collapsed) {
+    paneEl.style.display = collapsed ? 'none' : '';
+    localStorage.setItem(storageKey, collapsed ? '1' : '0');
+  }
+  setCollapsed(localStorage.getItem(storageKey) === '1');
+  btnEl.addEventListener('click', () => setCollapsed(paneEl.style.display !== 'none'));
+}
+
+function initLayout() {
+  const treePane = document.getElementById('treePane');
+  const side = document.getElementById('side');
+  const editorPane = document.getElementById('editorPane');
+
+  const treeWidth = localStorage.getItem('hermes.workspace.treeWidth');
+  if (treeWidth) treePane.style.width = treeWidth + 'px';
+  const sideWidth = localStorage.getItem('hermes.workspace.sideWidth');
+  if (sideWidth) side.style.width = sideWidth + 'px';
+
+  makeResizable(document.getElementById('treeHandle'), treePane, { min: 140, max: 360, storageKey: 'hermes.workspace.treeWidth' });
+  makeResizable(document.getElementById('sideHandle'), side, { min: 180, max: 420, storageKey: 'hermes.workspace.sideWidth', invert: true });
+  makeResizable(document.getElementById('editorHandle'), editorPane, { min: 220, max: 560, storageKey: 'hermes.workspace.editorWidth' });
+
+  collapsePane(document.getElementById('toggleTreeBtn'), treePane, { storageKey: 'hermes.workspace.treeCollapsed' });
+  collapsePane(document.getElementById('toggleSideBtn'), side, { storageKey: 'hermes.workspace.sideCollapsed' });
+}
+
+initLayout();
 
 (async () => {
   const me = await requireAuth();
