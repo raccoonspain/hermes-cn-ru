@@ -16,21 +16,27 @@
   body{
     background:var(--sky); color:var(--text);
     font-family:Georgia,"Iowan Old Style",serif;
-    height:100vh; display:grid;
-    grid-template-columns:260px 1fr 360px;
-    grid-template-rows:56px 1fr;
-    grid-template-areas:"top top top" "tree chat side";
+    height:100vh; display:flex; flex-direction:column;
   }
   .topbar{
-    grid-area:top; border-bottom:1px solid var(--panel-line);
+    border-bottom:1px solid var(--panel-line); flex-shrink:0; height:56px;
     display:flex; align-items:center; gap:14px; padding:0 20px;
     font-family:ui-monospace,Consolas,monospace; font-size:12.5px; color:var(--text-dim);
   }
   .topbar a{color:var(--text-dim); text-decoration:none}
   .topbar a:hover{color:var(--gold)}
   .topbar .title{color:var(--text); font-family:Georgia,serif; font-size:14.5px; font-style:italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:600px}
+  .topbar-spacer{flex:1}
+  .layout-toggle-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:6px;font-family:inherit;font-size:11.5px;padding:4px 9px;cursor:pointer}
+  .layout-toggle-btn:hover{color:var(--text);border-color:var(--gold)}
 
-  .tree{grid-area:tree; border-right:1px solid var(--panel-line); padding:18px 14px; overflow-y:auto}
+  .body-row{flex:1; display:flex; min-height:0}
+  .drag-handle{position:absolute; top:0; bottom:0; width:6px; cursor:col-resize; z-index:5}
+  .drag-handle:hover, .drag-handle.dragging{background:var(--gold)}
+
+  .tree-pane{position:relative; width:260px; flex-shrink:0; display:flex; flex-direction:column; border-right:1px solid var(--panel-line)}
+  .tree-pane .drag-handle{right:-3px}
+  .tree{flex:1; padding:18px 14px; overflow-y:auto}
   .tree .glabel{font-family:ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center}
   .tree .glabel:first-child{margin-top:0}
   .new-folder-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
@@ -48,7 +54,7 @@
   .node.folder-misc .ic{color:var(--c-misc)}
   .node .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 
-  .chat{grid-area:chat; display:flex; flex-direction:column; min-height:0}
+  .chat{flex:1; min-width:0; display:flex; flex-direction:column; min-height:0}
   .messages{flex:1; overflow-y:auto; padding:26px 34px; display:flex; flex-direction:column; gap:20px}
   .msg{max-width:72%; display:flex; flex-direction:column; gap:8px}
   .msg.user{align-self:flex-end; align-items:flex-end}
@@ -93,7 +99,8 @@
   .icon-btn:hover{color:var(--text);border-color:var(--violet)}
   .send-btn{background:var(--gold);border:none;color:var(--sky-deep);width:36px;height:36px;border-radius:10px;cursor:pointer;flex-shrink:0;font-size:14px}
 
-  .side{grid-area:side; border-left:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0}
+  .side{position:relative; width:360px; flex-shrink:0; border-left:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0}
+  .side .drag-handle{left:-3px}
   .side-tabs{display:flex; border-bottom:1px solid var(--panel-line)}
   .side-tabs button{flex:1;background:none;border:none;color:var(--text-dim);padding:13px 8px;cursor:pointer;font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid transparent}
   .side-tabs button.on{color:var(--text);border-bottom-color:var(--gold)}
@@ -115,11 +122,12 @@
   .legend span{display:flex;align-items:center;gap:5px}
   .legend .sw{width:7px;height:7px;border-radius:50%}
 
-  .overlay{position:fixed;inset:0;background:rgba(6,8,16,.7);display:none;align-items:center;justify-content:center;z-index:10}
-  .overlay.on{display:flex}
-  .editor{width:640px;max-width:90vw;background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;overflow:hidden}
+  .editor-pane{position:relative; width:320px; flex-shrink:0; display:none; flex-direction:column; border-right:1px solid var(--panel-line); background:var(--panel)}
+  .editor-pane .drag-handle{right:-3px}
   .editor-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--panel-line);font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-dim)}
-  .editor textarea{width:100%;height:340px;background:var(--sky-deep);color:var(--text);border:none;outline:none;padding:16px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;resize:none}
+  .editor-head .x-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;line-height:1}
+  .editor-head .x-btn:hover{color:var(--text);border-color:var(--gold)}
+  .editor-pane textarea{flex:1;background:var(--sky-deep);color:var(--text);border:none;outline:none;padding:16px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;resize:none}
   .editor-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--panel-line)}
   .editor-foot button{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;padding:8px 14px;border-radius:8px;cursor:pointer}
 </style>
@@ -130,48 +138,59 @@
   <a href="home.html" title="на главную">🏠</a>
   <a href="project-selector.html">← к проектам</a>
   <span class="title" id="projectTitle">Загрузка…</span>
+  <span class="topbar-spacer"></span>
+  <button class="layout-toggle-btn" id="toggleTreeBtn" title="свернуть/развернуть дерево файлов">🌲 дерево</button>
+  <button class="layout-toggle-btn" id="toggleSideBtn" title="свернуть/развернуть боковую панель">🗂 панель</button>
 </div>
 
-<div class="tree" id="tree"></div>
-
-<div class="chat">
-  <div class="messages" id="messages"></div>
-  <div class="composer">
-    <div class="compose-attachments" id="composeAttachments"></div>
-    <div class="upload-target-row">
-      <span>папка для вложений:</span>
-      <select id="uploadTargetSelect"></select>
-    </div>
-    <div class="upload-target-row">
-      <span>папка для результата:</span>
-      <select id="resultTargetSelect"></select>
-    </div>
-    <div class="compose-box">
-      <button class="icon-btn" id="attachBtn" title="прикрепить файлы">📎</button>
-      <textarea id="composeInput" rows="1" placeholder="Написать Hermes… (Ctrl+V — вставить изображение из буфера)"></textarea>
-      <button class="send-btn" id="sendBtn" title="отправить">➤</button>
-    </div>
-    <input type="file" id="fileInput" multiple style="display:none">
+<div class="body-row">
+  <div class="tree-pane" id="treePane">
+    <div class="tree" id="tree"></div>
+    <div class="drag-handle" id="treeHandle"></div>
   </div>
-</div>
 
-<div class="side">
-  <div class="side-tabs">
-    <button class="on" data-tab="activity">Активность агента</button>
-    <button data-tab="files">Файлы</button>
-  </div>
-  <div class="side-pane on" id="pane-activity"></div>
-  <div class="side-pane" id="pane-files"></div>
-</div>
-
-<div class="overlay" id="overlay">
-  <div class="editor">
-    <div class="editor-head"><span id="editorName"></span><span>txt/md редактор</span></div>
+  <div class="editor-pane" id="editorPane">
+    <div class="editor-head">
+      <span id="editorName"></span>
+      <button class="x-btn" id="editorCloseXBtn" title="закрыть">✕</button>
+    </div>
     <textarea id="editorText"></textarea>
     <div class="editor-foot">
-      <button class="icon-btn" id="closeEditorBtn">Закрыть</button>
+      <button class="icon-btn" id="cancelEditorBtn">Отменить</button>
       <button class="send-btn" id="saveEditorBtn" style="width:auto;padding:0 16px">Сохранить</button>
     </div>
+    <div class="drag-handle" id="editorHandle"></div>
+  </div>
+
+  <div class="chat">
+    <div class="messages" id="messages"></div>
+    <div class="composer">
+      <div class="compose-attachments" id="composeAttachments"></div>
+      <div class="upload-target-row">
+        <span>папка для вложений:</span>
+        <select id="uploadTargetSelect"></select>
+      </div>
+      <div class="upload-target-row">
+        <span>папка для результата:</span>
+        <select id="resultTargetSelect"></select>
+      </div>
+      <div class="compose-box">
+        <button class="icon-btn" id="attachBtn" title="прикрепить файлы">📎</button>
+        <textarea id="composeInput" rows="1" placeholder="Написать Hermes… (Ctrl+V — вставить изображение из буфера)"></textarea>
+        <button class="send-btn" id="sendBtn" title="отправить">➤</button>
+      </div>
+      <input type="file" id="fileInput" multiple style="display:none">
+    </div>
+  </div>
+
+  <div class="side" id="side">
+    <div class="drag-handle" id="sideHandle"></div>
+    <div class="side-tabs">
+      <button class="on" data-tab="activity">Активность агента</button>
+      <button data-tab="files">Файлы</button>
+    </div>
+    <div class="side-pane on" id="pane-activity"></div>
+    <div class="side-pane" id="pane-files"></div>
   </div>
 </div>
 
@@ -600,13 +619,21 @@ async function refreshTreeAndFiles() {
   renderFilesTab(currentTree, computeFileMessageIndex(currentTree, messages));
 }
 
+function showEditorPane() {
+  document.getElementById('editorPane').style.display = 'flex';
+}
+
+function closeEditorPane() {
+  document.getElementById('editorPane').style.display = 'none';
+}
+
 async function openEditor(relpath) {
   const resp = await apiFetch('/api/projects/file?' + new URLSearchParams({ path: projectPath, file: relpath }));
   if (resp.status === 401) { location.href = 'login.html'; return; }
   if (!resp.ok) { alert('Не удалось открыть файл'); return; }
   document.getElementById('editorName').textContent = relpath;
   document.getElementById('editorText').value = await resp.text();
-  document.getElementById('overlay').classList.add('on');
+  showEditorPane();
   document.getElementById('saveEditorBtn').onclick = () => saveEditor(relpath);
 }
 
@@ -622,7 +649,6 @@ async function saveEditor(relpath) {
     alert('Не удалось сохранить: ' + (body.error || resp.status));
     return;
   }
-  document.getElementById('overlay').classList.remove('on');
   await refreshTreeAndFiles();
 }
 
@@ -650,7 +676,8 @@ async function moveEntry(relpath) {
   await refreshTreeAndFiles();
 }
 
-document.getElementById('closeEditorBtn').addEventListener('click', () => document.getElementById('overlay').classList.remove('on'));
+document.getElementById('editorCloseXBtn').addEventListener('click', closeEditorPane);
+document.getElementById('cancelEditorBtn').addEventListener('click', closeEditorPane);
 
 function clearActivity() { document.getElementById('pane-activity').innerHTML = ''; }
 
