@@ -93,8 +93,10 @@
   .compose-attachments .thumb{width:52px;height:52px;border-radius:8px;border:1px solid var(--panel-line);background:var(--panel) center/cover no-repeat;position:relative;overflow:hidden}
   .upload-target-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text-dim)}
   .upload-target-row select{background:var(--panel);color:var(--text);border:1px solid var(--panel-line);border-radius:6px;font-family:inherit;font-size:11px;padding:3px 6px}
-  .compose-box{display:flex;align-items:flex-end;gap:10px;background:var(--panel);border:1px solid var(--panel-line);border-radius:14px;padding:8px 8px 8px 14px}
-  .compose-box textarea{flex:1;background:none;border:none;outline:none;resize:none;color:var(--text);font-family:Georgia,serif;font-size:14px;line-height:1.5;max-height:120px;padding:8px 0}
+  .compose-box{position:relative;display:flex;align-items:flex-end;gap:10px;background:var(--panel);border:1px solid var(--panel-line);border-radius:14px;padding:8px 8px 8px 14px}
+  .compose-resize-handle{position:absolute;top:-4px;left:14px;right:14px;height:7px;cursor:row-resize;border-radius:4px}
+  .compose-resize-handle:hover,.compose-resize-handle.dragging{background:var(--gold)}
+  .compose-box textarea{flex:1;background:none;border:none;outline:none;resize:none;overflow-y:auto;color:var(--text);font-family:Georgia,serif;font-size:14px;line-height:1.5;padding:8px 0}
   .icon-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);width:36px;height:36px;border-radius:10px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}
   .icon-btn:hover{color:var(--text);border-color:var(--violet)}
   .send-btn{background:var(--gold);border:none;color:var(--sky-deep);width:36px;height:36px;border-radius:10px;cursor:pointer;flex-shrink:0;font-size:14px}
@@ -176,6 +178,7 @@
         <select id="resultTargetSelect"></select>
       </div>
       <div class="compose-box">
+        <div class="compose-resize-handle" id="composeResizeHandle"></div>
         <button class="icon-btn" id="attachBtn" title="прикрепить файлы">📎</button>
         <textarea id="composeInput" rows="1" placeholder="Написать Hermes… (Ctrl+V — вставить изображение из буфера)"></textarea>
         <button class="send-btn" id="sendBtn" title="отправить">➤</button>
@@ -764,6 +767,7 @@ async function sendMessage() {
   if (sendBtn.disabled) return;
   sendBtn.disabled = true;
   input.value = '';
+  autosizeCompose();
 
   let fullText = text;
   if (pendingAttachments.length) fullText += `\n\n📎 ${pendingAttachments.map(a => a.relative_path).join(', ')}`;
@@ -897,7 +901,57 @@ async function recoverAfterStreamDrop() {
   renderMessages();
 }
 
+const COMPOSE_MIN_HEIGHT = 40;
+const COMPOSE_AUTOGROW_MAX = 200;
+const COMPOSE_DRAG_MAX = 480;
+let composeManualHeight = null;
+
+function autosizeCompose() {
+  if (composeManualHeight) return; // высота один раз задана вручную — печать её больше не меняет
+  const el = document.getElementById('composeInput');
+  el.style.height = 'auto';
+  el.style.height = Math.min(COMPOSE_AUTOGROW_MAX, Math.max(COMPOSE_MIN_HEIGHT, el.scrollHeight)) + 'px';
+}
+
+function initCompose() {
+  const textarea = document.getElementById('composeInput');
+  const handle = document.getElementById('composeResizeHandle');
+
+  try {
+    const saved = Number(localStorage.getItem('hermes.workspace.composeHeight'));
+    if (saved) composeManualHeight = Math.min(COMPOSE_DRAG_MAX, Math.max(COMPOSE_MIN_HEIGHT, saved));
+  } catch {}
+  if (composeManualHeight) textarea.style.height = composeManualHeight + 'px';
+
+  let dragging = false, startY = 0, startHeight = 0;
+  function onMove(e) {
+    if (!dragging) return;
+    // хендл на верхней границе — тянешь вверх (clientY меньше) — растёт высота
+    const delta = startY - e.clientY;
+    textarea.style.height = Math.min(COMPOSE_DRAG_MAX, Math.max(COMPOSE_MIN_HEIGHT, startHeight + delta)) + 'px';
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    composeManualHeight = parseInt(textarea.style.height, 10);
+    try { localStorage.setItem('hermes.workspace.composeHeight', composeManualHeight); } catch {}
+  }
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startY = e.clientY;
+    startHeight = textarea.getBoundingClientRect().height;
+    handle.classList.add('dragging');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
+}
+
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
+document.getElementById('composeInput').addEventListener('input', autosizeCompose);
 document.getElementById('composeInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
@@ -986,6 +1040,7 @@ function initLayout() {
 }
 
 initLayout();
+initCompose();
 
 (async () => {
   const me = await requireAuth();
