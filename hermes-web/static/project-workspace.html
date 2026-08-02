@@ -208,6 +208,9 @@ let messages = [];
 let recoveryStatus = null;
 let currentTree = null;
 let pendingAttachments = [];
+let currentEditorFile = null;
+let editorDirty = false;
+const EDITOR_DISCARD_CONFIRM = 'Есть несохранённые изменения — открыть другой файл и потерять их?';
 
 function escapeHtml(s) {
   const div = document.createElement('div');
@@ -630,12 +633,23 @@ function closeEditorPane() {
   document.getElementById('editorPane').style.display = 'none';
 }
 
+function attemptCloseEditor() {
+  if (editorDirty && !confirm(EDITOR_DISCARD_CONFIRM)) return;
+  closeEditorPane();
+  currentEditorFile = null;
+  editorDirty = false;
+}
+
 async function openEditor(relpath) {
+  if (currentEditorFile === relpath) return;
+  if (editorDirty && !confirm(EDITOR_DISCARD_CONFIRM)) return;
   const resp = await apiFetch('/api/projects/file?' + new URLSearchParams({ path: projectPath, file: relpath }));
   if (resp.status === 401) { location.href = 'login.html'; return; }
   if (!resp.ok) { alert('Не удалось открыть файл'); return; }
   document.getElementById('editorName').textContent = relpath;
   document.getElementById('editorText').value = await resp.text();
+  currentEditorFile = relpath;
+  editorDirty = false;
   showEditorPane();
   document.getElementById('saveEditorBtn').onclick = () => saveEditor(relpath);
 }
@@ -652,6 +666,7 @@ async function saveEditor(relpath) {
     alert('Не удалось сохранить: ' + (body.error || resp.status));
     return;
   }
+  editorDirty = false;
   await refreshTreeAndFiles();
 }
 
@@ -679,8 +694,9 @@ async function moveEntry(relpath) {
   await refreshTreeAndFiles();
 }
 
-document.getElementById('editorCloseXBtn').addEventListener('click', closeEditorPane);
-document.getElementById('cancelEditorBtn').addEventListener('click', closeEditorPane);
+document.getElementById('editorText').addEventListener('input', () => { editorDirty = true; });
+document.getElementById('editorCloseXBtn').addEventListener('click', attemptCloseEditor);
+document.getElementById('cancelEditorBtn').addEventListener('click', attemptCloseEditor);
 
 function clearActivity() { document.getElementById('pane-activity').innerHTML = ''; }
 
