@@ -125,7 +125,8 @@
   .editor-pane{position:relative; width:320px; flex-shrink:0; display:none; flex-direction:column; border-right:1px solid var(--panel-line); background:var(--panel)}
   .editor-pane .drag-handle{right:-3px}
   .editor-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--panel-line);font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-dim)}
-  .editor-head .x-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;line-height:1}
+  .editor-head #editorName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .editor-head .x-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;line-height:1;flex-shrink:0}
   .editor-head .x-btn:hover{color:var(--text);border-color:var(--gold)}
   .editor-pane textarea{flex:1;background:var(--sky-deep);color:var(--text);border:none;outline:none;padding:16px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;resize:none}
   .editor-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--panel-line)}
@@ -622,10 +623,16 @@ async function refreshTreeAndFiles() {
   renderFilesTab(currentTree, computeFileMessageIndex(currentTree, messages));
 }
 
+function editorMaxWidth() {
+  return Math.max(560, document.querySelector('.body-row').clientWidth * 0.5);
+}
+
 function showEditorPane() {
   const pane = document.getElementById('editorPane');
-  const savedWidth = localStorage.getItem('hermes.workspace.editorWidth');
-  pane.style.width = (savedWidth ? Number(savedWidth) : 320) + 'px';
+  let savedWidth = 0;
+  try { savedWidth = Number(localStorage.getItem('hermes.workspace.editorWidth')); } catch {}
+  const width = savedWidth ? Math.min(editorMaxWidth(), Math.max(220, savedWidth)) : 320;
+  pane.style.width = width + 'px';
   pane.style.display = 'flex';
 }
 
@@ -641,8 +648,13 @@ function attemptCloseEditor() {
 }
 
 async function openEditor(relpath) {
-  if (currentEditorFile === relpath) return;
-  if (editorDirty && !confirm(EDITOR_DISCARD_CONFIRM)) return;
+  if (currentEditorFile === relpath) {
+    if (editorDirty) return; // несохранённый буфер — не трогаем, без confirm
+    // буфер чист — файл на диске мог измениться (например, его переписал
+    // агент), перечитываем содержимое заново
+  } else if (editorDirty && !confirm(EDITOR_DISCARD_CONFIRM)) {
+    return;
+  }
   const resp = await apiFetch('/api/projects/file?' + new URLSearchParams({ path: projectPath, file: relpath }));
   if (resp.status === 401) { location.href = 'login.html'; return; }
   if (!resp.ok) { alert('Не удалось открыть файл'); return; }
@@ -690,6 +702,12 @@ async function moveEntry(relpath) {
     const body = await resp.json().catch(() => ({}));
     alert('Не удалось переместить: ' + (body.error || resp.status));
     return;
+  }
+  const body = await resp.json();
+  if (currentEditorFile === relpath) {
+    currentEditorFile = body.relative_path;
+    document.getElementById('editorName').textContent = currentEditorFile;
+    document.getElementById('saveEditorBtn').onclick = () => saveEditor(currentEditorFile);
   }
   await refreshTreeAndFiles();
 }
@@ -910,11 +928,11 @@ document.querySelectorAll('.side-tabs button').forEach(b => {
 });
 
 function makeResizable(handleEl, paneEl, { min, max, storageKey, invert }) {
-  let dragging = false, startX = 0, startWidth = 0;
+  let dragging = false, startX = 0, startWidth = 0, effectiveMax = 0;
   function onMove(e) {
     if (!dragging) return;
     const delta = (e.clientX - startX) * (invert ? -1 : 1);
-    paneEl.style.width = Math.min(max, Math.max(min, startWidth + delta)) + 'px';
+    paneEl.style.width = Math.min(effectiveMax, Math.max(min, startWidth + delta)) + 'px';
   }
   function onUp() {
     if (!dragging) return;
@@ -928,6 +946,7 @@ function makeResizable(handleEl, paneEl, { min, max, storageKey, invert }) {
     dragging = true;
     startX = e.clientX;
     startWidth = paneEl.getBoundingClientRect().width;
+    effectiveMax = typeof max === 'function' ? max() : max;
     handleEl.classList.add('dragging');
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -940,7 +959,9 @@ function collapsePane(btnEl, paneEl, { storageKey }) {
     paneEl.style.display = collapsed ? 'none' : '';
     localStorage.setItem(storageKey, collapsed ? '1' : '0');
   }
-  setCollapsed(localStorage.getItem(storageKey) === '1');
+  let initiallyCollapsed = false;
+  try { initiallyCollapsed = localStorage.getItem(storageKey) === '1'; } catch {}
+  setCollapsed(initiallyCollapsed);
   btnEl.addEventListener('click', () => setCollapsed(paneEl.style.display !== 'none'));
 }
 
@@ -949,17 +970,15 @@ function initLayout() {
   const side = document.getElementById('side');
   const editorPane = document.getElementById('editorPane');
 
-  const treeWidth = localStorage.getItem('hermes.workspace.treeWidth');
-  if (treeWidth) treePane.style.width = treeWidth + 'px';
-  const sideWidth = localStorage.getItem('hermes.workspace.sideWidth');
-  if (sideWidth) side.style.width = sideWidth + 'px';
+  try {
+    const treeWidth = localStorage.getItem('hermes.workspace.treeWidth');
+    if (treeWidth) treePane.style.width = treeWidth + 'px';
+    const sideWidth = localStorage.getItem('hermes.workspace.sideWidth');
+    if (sideWidth) side.style.width = sideWidth + 'px';
+  } catch {}
 
   makeResizable(document.getElementById('treeHandle'), treePane, { min: 140, max: 360, storageKey: 'hermes.workspace.treeWidth' });
   makeResizable(document.getElementById('sideHandle'), side, { min: 180, max: 420, storageKey: 'hermes.workspace.sideWidth', invert: true });
-  // Пользователь попросил живьём (2026-08-02): 560px мало, хочет тянуть
-  // минимум до половины рабочей области — считаем потолок от реальной
-  // ширины .body-row на момент загрузки, не только от фиксированного 560.
-  const editorMaxWidth = Math.max(560, document.querySelector('.body-row').clientWidth * 0.5);
   makeResizable(document.getElementById('editorHandle'), editorPane, { min: 220, max: editorMaxWidth, storageKey: 'hermes.workspace.editorWidth' });
 
   collapsePane(document.getElementById('toggleTreeBtn'), treePane, { storageKey: 'hermes.workspace.treeCollapsed' });
