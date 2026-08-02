@@ -793,3 +793,38 @@ def test_delete_entry_removes_symlink_not_its_target(tmp_path):
     assert result["relative_path"] == "source/link.txt"
     assert not os.path.lexists(link)
     assert target.read_text(encoding="utf-8") == "настоящий файл"
+
+
+def test_delete_entry_rejects_symlink_swapped_for_about_md(tmp_path):
+    """about.md replaced by a symlink pointing elsewhere in the project must
+    still be protected — the guard must look at the literal requested path,
+    not where the symlink resolves to."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    (project_dir / "source" / "note.txt").write_text("текст", encoding="utf-8")
+    about_path = project_dir / "about.md"
+    about_path.unlink()
+    os.symlink(project_dir / "source" / "note.txt", about_path)
+
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.delete_entry("dem", "dem/ALL/a", "about.md", config)
+    assert os.path.lexists(about_path)
+    assert (project_dir / "source" / "note.txt").exists()
+
+
+def test_delete_entry_allows_symlink_that_merely_points_at_about_md(tmp_path):
+    """A harmless symlink stored inside a bucket that happens to point AT
+    about.md must still be deletable — only the link is removed, and the
+    guard must not reject it just because it resolves to a protected path."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    link = project_dir / "source" / "link_to_about_md"
+    os.symlink(project_dir / "about.md", link)
+
+    result = workspace.delete_entry("dem", "dem/ALL/a", "source/link_to_about_md", config)
+
+    assert result["relative_path"] == "source/link_to_about_md"
+    assert not os.path.lexists(link)
+    assert (project_dir / "about.md").exists()

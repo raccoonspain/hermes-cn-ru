@@ -328,21 +328,21 @@ def move_entry(user: str, project_path: str, source: str, dest_dir: str, new_nam
 
 def delete_entry(user: str, project_path: str, relative_path: str, config) -> dict:
     project_root, candidate = resolve_file_path(user, project_path, relative_path, config)
-    literal_path = os.path.join(project_root, relative_path)
+    literal_path = os.path.normpath(os.path.join(project_root, relative_path))
 
     if not os.path.lexists(literal_path):
         raise WorkspaceError(f"'{relative_path}' не найден")
-    if candidate == project_root:
+    if literal_path == project_root:
         raise WorkspaceError(f"'{relative_path}' нельзя удалить")
     for root_file in ROOT_EDITABLE_FILES:
-        if candidate == os.path.join(project_root, root_file):
+        if literal_path == os.path.join(project_root, root_file):
             raise WorkspaceError(f"'{relative_path}' нельзя удалить")
     for bucket in BUCKETS:
-        if candidate == os.path.join(project_root, bucket):
+        if literal_path == os.path.join(project_root, bucket):
             raise WorkspaceError(f"'{relative_path}' нельзя удалить — это сам bucket '{bucket}'")
 
-    if not _within_bucket(project_root, candidate):
-        rel_parts = os.path.relpath(candidate, project_root).split(os.sep)
+    if not _within_bucket(project_root, literal_path):
+        rel_parts = os.path.relpath(literal_path, project_root).split(os.sep)
         if any(part.startswith(".") for part in rel_parts):
             raise WorkspaceError(f"'{relative_path}' нельзя удалить")
 
