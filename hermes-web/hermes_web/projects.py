@@ -212,3 +212,7 @@ async def update_project_metadata(user: str, project_path: str, config, tags=Non
             tags=tags, status=status, **_project_index_kwargs(config),
         ),
     )
+
+
+def count_projects(user: str, config) -> int:
+    return len(project_index_core.list_projects_for_user(user, **_workspace_kwargs(config)))

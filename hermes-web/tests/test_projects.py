@@ -358,3 +358,8 @@ async def test_update_project_metadata_updates_tags_on_disk(tmp_path):
     assert result["tags"] == ["новый"]
     detail = projects.get_project_detail("dem", "dem/ALL/a", config)
     assert detail["tags"] == ["новый"]
+
+
+def test_count_projects_returns_zero_for_user_without_projects(tmp_path):
+    config = _config(tmp_path)
+    assert projects.count_projects("dem", config) == 0

@@ -8,13 +8,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 import urllib.parse
 
 import aiohttp
 from aiohttp import web
 
-from . import auth, hermes_client, projects, quickchat, storage, workspace
+from . import admin_metrics, auth, hermes_client, projects, quickchat, storage, workspace
 
 COOKIE_NAME = "hermes_web_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 дней
@@ -31,6 +32,16 @@ def _require_user(request: web.Request) -> dict:
     user = request.get("user")
     if user is None:
         raise web.HTTPUnauthorized(text=json.dumps({"error": "not authenticated"}), content_type="application/json")
+    return user
+
+
+USERNAME_RE = re.compile(r"^[a-z0-9_-]{2,32}$")
+
+
+def _require_owner(request: web.Request) -> dict:
+    user = _require_user(request)
+    if user["role"] != "owner":
+        raise web.HTTPForbidden(text=json.dumps({"error": "forbidden"}), content_type="application/json")
     return user
 
 
@@ -473,6 +484,118 @@ async def handle_project_upload(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def handle_admin_overview(request: web.Request) -> web.Response:
+    _require_owner(request)
+    config = request.app["quickchat_config"]
+    workspace_root = config.workspace_root or projects.project_index_core.WORKSPACE_ROOT
+    # На свежем деплое workspace_root ещё может не существовать на диске —
+    # каталог создаётся лениво при первом создании группы/проекта
+    # (см. projects.create_group). shutil.disk_usage (внутри
+    # admin_metrics.disk_usage) требует существующий путь, а овнер может
+    # открыть админ-панель раньше, чем кто-либо создаст первый проект.
+    os.makedirs(workspace_root, exist_ok=True)
+    cpu = await admin_metrics.cpu_percent()
+    ram = admin_metrics.ram_usage()
+    disk = admin_metrics.disk_usage(workspace_root)
+    active = storage.count_active_sessions(request.app["db"], now=time.time())
+    return web.json_response({
+        "cpu_percent": cpu,
+        "ram": ram,
+        "disk": disk,
+        "active_sessions": active["sessions"],
+        "active_users": active["users"],
+    })
+
+
+async def handle_admin_list_users(request: web.Request) -> web.Response:
+    _require_owner(request)
+    config = request.app["quickchat_config"]
+    db = request.app["db"]
+    result = []
+    for row in storage.list_users(db):
+        username = row["username"]
+        project_count = projects.count_projects(username, config)
+        result.append({
+            "username": username,
+            "display_name": row["display_name"],
+            "role": row["role"],
+            "project_count": project_count,
+            "last_active": storage.get_last_activity(db, username),
+        })
+    return web.json_response({"users": result})
+
+
+async def handle_admin_create_user(request: web.Request) -> web.Response:
+    admin_user = _require_owner(request)
+    body = await request.json()
+    username = str(body.get("username", ""))
+    display_name = str(body.get("display_name", "")).strip()
+    role = str(body.get("role", ""))
+    password = str(body.get("password", ""))
+
+    if not USERNAME_RE.match(username):
+        return web.json_response(
+            {"error": "логин должен состоять из строчных латинских букв, цифр, '_' и '-' (2-32 символа)"},
+            status=400,
+        )
+    if role not in ("owner", "participant"):
+        return web.json_response({"error": "role должен быть 'owner' или 'participant'"}, status=400)
+    if not display_name:
+        return web.json_response({"error": "имя не может быть пустым"}, status=400)
+    if not password:
+        return web.json_response({"error": "пароль не может быть пустым"}, status=400)
+    if storage.get_user(request.app["db"], username) is not None:
+        return web.json_response({"error": f"пользователь '{username}' уже существует"}, status=409)
+
+    storage.create_user(request.app["db"], username, auth.hash_password(password), role, display_name)
+    storage.log_event(request.app["db"], admin_user["username"], "user.create", username)
+    return web.json_response({"username": username, "display_name": display_name, "role": role})
+
+
+async def handle_admin_update_user(request: web.Request) -> web.Response:
+    admin_user = _require_owner(request)
+    username = request.match_info["username"]
+    body = await request.json()
+    display_name = str(body.get("display_name", "")).strip()
+    role = str(body.get("role", ""))
+
+    if storage.get_user(request.app["db"], username) is None:
+        return web.json_response({"error": "пользователь не найден"}, status=404)
+    if role not in ("owner", "participant"):
+        return web.json_response({"error": "role должен быть 'owner' или 'participant'"}, status=400)
+    if not display_name:
+        return web.json_response({"error": "имя не может быть пустым"}, status=400)
+    if username == admin_user["username"] and role != "owner":
+        return web.json_response({"error": "нельзя понизить роль самому себе"}, status=400)
+
+    storage.update_user(request.app["db"], username, display_name, role)
+    storage.log_event(request.app["db"], admin_user["username"], "user.update", username)
+    return web.json_response({"username": username, "display_name": display_name, "role": role})
+
+
+async def handle_admin_reset_password(request: web.Request) -> web.Response:
+    admin_user = _require_owner(request)
+    username = request.match_info["username"]
+    body = await request.json()
+    password = str(body.get("password", ""))
+
+    if storage.get_user(request.app["db"], username) is None:
+        return web.json_response({"error": "пользователь не найден"}, status=404)
+    if not password:
+        return web.json_response({"error": "пароль не может быть пустым"}, status=400)
+
+    storage.update_user_password(request.app["db"], username, auth.hash_password(password))
+    storage.log_event(request.app["db"], admin_user["username"], "user.reset_password", username)
+    return web.json_response({"ok": True})
+
+
+async def handle_admin_events(request: web.Request) -> web.Response:
+    _require_owner(request)
+    limit = int(request.query.get("limit", "50"))
+    events = storage.list_events(request.app["db"], limit=limit)
+    return web.json_response({"events": events})
+
+
 async def _on_startup(app: web.Application) -> None:
     # aiohttp.ClientSession() requires a running event loop (aiohttp >= 4-style
     # behaviour, already true in 3.14) — create_app() itself is a plain sync
@@ -536,6 +659,12 @@ def create_app(*, db_path: str, quickchat_config: quickchat.Config, cookie_secur
     app.router.add_post("/api/projects/mkdir", handle_project_mkdir)
     app.router.add_post("/api/projects/move-entry", handle_project_move_entry)
     app.router.add_post("/api/projects/upload", handle_project_upload)
+    app.router.add_get("/api/admin/overview", handle_admin_overview)
+    app.router.add_get("/api/admin/users", handle_admin_list_users)
+    app.router.add_post("/api/admin/users", handle_admin_create_user)
+    app.router.add_post("/api/admin/users/{username}", handle_admin_update_user)
+    app.router.add_post("/api/admin/users/{username}/reset-password", handle_admin_reset_password)
+    app.router.add_get("/api/admin/events", handle_admin_events)
     app.router.add_get("/", handle_root)
     app.router.add_static("/", static_dir, show_index=False)
     return app
