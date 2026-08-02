@@ -993,11 +993,26 @@ fileInput.addEventListener('change', async () => {
   await uploadPending([...fileInput.files], document.getElementById('uploadTargetSelect').value || 'source');
   fileInput.value = '';
 });
+function screenshotExtension(mimeType) {
+  const map = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+  return map[mimeType] || 'png';
+}
+
+function renameScreenshot(file, index, total) {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const time = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  const suffix = total > 1 ? `-${index + 1}` : '';
+  const name = `screenshot_${time}${suffix}.${screenshotExtension(file.type)}`;
+  return new File([file], name, { type: file.type });
+}
+
 document.getElementById('composeInput').addEventListener('paste', async (e) => {
   const items = e.clipboardData ? e.clipboardData.items : [];
   const files = [];
   for (const it of items) if (it.type.startsWith('image/')) files.push(it.getAsFile());
-  if (files.length) await uploadPending(files, document.getElementById('uploadTargetSelect').value || 'source');
+  const renamed = files.map((file, index) => renameScreenshot(file, index, files.length));
+  if (renamed.length) await uploadPending(renamed, document.getElementById('uploadTargetSelect').value || 'source');
 });
 document.getElementById('resultTargetSelect').addEventListener('change', () => {
   localStorage.setItem(resultTargetStorageKey(), document.getElementById('resultTargetSelect').value);
