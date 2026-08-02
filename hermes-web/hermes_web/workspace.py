@@ -327,32 +327,61 @@ def move_entry(user: str, project_path: str, source: str, dest_dir: str, new_nam
 
 
 def delete_entry(user: str, project_path: str, relative_path: str, config) -> dict:
-    project_root, candidate = resolve_file_path(user, project_path, relative_path, config)
+    """Гарантирует, что путь, против которого проверяются все guard'ы, и
+    путь, который реально удаляется, — один и тот же путь.
+
+    Раньше guard'ы (project-root, ROOT_EDITABLE_FILES, bucket-dir-сам-по-себе,
+    _within_bucket, скрытые пути) проверялись на literal_path — простой
+    os.path.normpath(join(...)) без разрешения симлинков — а удалялся
+    отдельно вычисленный candidate (полностью realpath-резолвнутый
+    resolve_file_path). Если ПРОМЕЖУТОЧНЫЙ (не последний) компонент пути —
+    симлинк на директорию, эти два пути расходятся, и guard'ы обходятся:
+    например, symlink source/up -> project_root делает literal_path для
+    'source/up/about.md' равным '<root>/source/up/about.md' (не совпадает
+    ни с одним guard'ом), тогда как реальное удаление резолвится обратно в
+    защищённый '<root>/about.md' (найдено финальным ревью).
+
+    Фикс: резолвим realpath только у РОДИТЕЛЬСКОЙ директории literal_path,
+    убеждаемся, что резолвнутый родитель всё ещё внутри project_root, и
+    собираем target из этого резолвнутого родителя + буквального (не
+    резолвнутого) basename. Все guard'ы и само удаление работают с этим
+    единым target. Basename не резолвится специально: симлинк как ПОСЛЕДНИЙ
+    компонент пути (тестируется test_delete_entry_removes_symlink_not_its_target
+    и парой symlink/about.md тестов) должен по-прежнему детектироваться
+    os.path.islink и удаляться как сама ссылка, а не как её цель."""
+    project_root, _candidate = resolve_file_path(user, project_path, relative_path, config)
     literal_path = os.path.normpath(os.path.join(project_root, relative_path))
 
-    if not os.path.lexists(literal_path):
+    literal_parent = os.path.dirname(literal_path)
+    basename = os.path.basename(literal_path)
+    resolved_parent = os.path.realpath(literal_parent)
+    if resolved_parent != project_root and not resolved_parent.startswith(project_root + os.sep):
+        raise WorkspaceError(f"'{relative_path}' выходит за пределы проекта")
+    target = os.path.join(resolved_parent, basename)
+
+    if not os.path.lexists(target):
         raise WorkspaceError(f"'{relative_path}' не найден")
-    if literal_path == project_root:
+    if target == project_root:
         raise WorkspaceError(f"'{relative_path}' нельзя удалить")
     for root_file in ROOT_EDITABLE_FILES:
-        if literal_path == os.path.join(project_root, root_file):
+        if target == os.path.join(project_root, root_file):
             raise WorkspaceError(f"'{relative_path}' нельзя удалить")
     for bucket in BUCKETS:
-        if literal_path == os.path.join(project_root, bucket):
+        if target == os.path.join(project_root, bucket):
             raise WorkspaceError(f"'{relative_path}' нельзя удалить — это сам bucket '{bucket}'")
 
-    if not _within_bucket(project_root, literal_path):
-        rel_parts = os.path.relpath(literal_path, project_root).split(os.sep)
+    if not _within_bucket(project_root, target):
+        rel_parts = os.path.relpath(target, project_root).split(os.sep)
         if any(part.startswith(".") for part in rel_parts):
             raise WorkspaceError(f"'{relative_path}' нельзя удалить")
 
     permissions.ensure_ownership_sync(project_root)
 
-    if os.path.islink(literal_path):
-        os.remove(literal_path)
-        return {"relative_path": os.path.relpath(literal_path, project_root)}
-    if os.path.isdir(candidate):
-        shutil.rmtree(candidate)
+    if os.path.islink(target):
+        os.remove(target)
+        return {"relative_path": os.path.relpath(target, project_root)}
+    if os.path.isdir(target):
+        shutil.rmtree(target)
     else:
-        os.remove(candidate)
-    return {"relative_path": os.path.relpath(candidate, project_root)}
+        os.remove(target)
+    return {"relative_path": os.path.relpath(target, project_root)}

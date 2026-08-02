@@ -828,3 +828,40 @@ def test_delete_entry_allows_symlink_that_merely_points_at_about_md(tmp_path):
     assert result["relative_path"] == "source/link_to_about_md"
     assert not os.path.lexists(link)
     assert (project_dir / "about.md").exists()
+
+
+def test_delete_entry_rejects_bypass_via_intermediate_directory_symlink(tmp_path):
+    """Final whole-branch review finding: all guards used to run against
+    literal_path (a plain os.path.normpath join, never resolving symlinks),
+    while the actual deletion targeted `candidate` (fully realpath-resolved
+    by resolve_file_path). Those two only match when every path component
+    is a real directory. A directory symlink placed as an INTERMEDIATE
+    component — e.g. source/up -> project_root — makes them diverge:
+    literal_path for 'source/up/about.md' is '<root>/source/up/about.md'
+    (matches no guard), while the real deletion target resolves through
+    the symlink back to '<root>/about.md' — the protected file. This must
+    be rejected exactly like a direct 'about.md' delete attempt."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    (project_dir / "source").mkdir()
+    os.symlink(project_dir, project_dir / "source" / "up", target_is_directory=True)
+
+    with pytest.raises(workspace.WorkspaceError):
+        workspace.delete_entry("dem", "dem/ALL/a", "source/up/about.md", config)
+    assert (project_dir / "about.md").exists()
+
+
+def test_delete_entry_removes_deeply_nested_file_without_symlinks(tmp_path):
+    """No-symlink baseline for the fix above: a legitimately nested path
+    (multiple real directory levels, no symlinks anywhere) must keep
+    working normally after guards are re-pointed at the resolved parent."""
+    config = _config(tmp_path)
+    project_dir = _write_project(tmp_path, config, "dem/ALL/a")
+    nested = project_dir / "outer" / "topic" / "sub"
+    nested.mkdir(parents=True)
+    (nested / "deep.txt").write_text("глубоко", encoding="utf-8")
+
+    result = workspace.delete_entry("dem", "dem/ALL/a", "outer/topic/sub/deep.txt", config)
+
+    assert result["relative_path"] == "outer/topic/sub/deep.txt"
+    assert not (nested / "deep.txt").exists()
