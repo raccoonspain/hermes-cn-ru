@@ -833,14 +833,29 @@ async function sendMessage() {
   clearActivity();
 
   try {
-    const resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/send`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: fullText,
-        result_target: document.getElementById('resultTargetSelect').value || 'result',
-      }),
-      signal: currentAbortController.signal,
-    });
+    let resp;
+    try {
+      resp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/send`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: fullText,
+          result_target: document.getElementById('resultTargetSelect').value || 'result',
+        }),
+        signal: currentAbortController.signal,
+      });
+    } catch (err) {
+      // STOP нажали до того, как пришли заголовки ответа — тот же случай,
+      // что и обрыв во время чтения SSE-потока ниже, просто на более раннем
+      // этапе. Настоящий сетевой сбой (не наша же отмена) показываем как
+      // обычно.
+      if (err.name === 'AbortError') {
+        messages[assistantIdx].content += '\n\n⏹ _остановлено пользователем_';
+      } else {
+        messages[assistantIdx].content = 'Hermes временно недоступен, попробуйте ещё раз';
+      }
+      renderMessages();
+      return;
+    }
     if (resp.status === 401) { location.href = 'login.html'; return; }
     if (!resp.ok) {
       messages[assistantIdx].content = 'Hermes временно недоступен, попробуйте ещё раз';
