@@ -80,9 +80,40 @@ model:
 `config.yaml` и не в этом репозитории.
 
 Вспомогательные модели (`config.yaml` → `auxiliary`) — отдельно от
-основной: vision (`wormsoft/vision/high`), извлечение веб-контента
-(`wormsoft/agent/low`), сжатие контекста (`openai/gpt-oss:20b`) — дешевле
-и быстрее, чем гонять на них главную модель.
+основной: извлечение веб-контента (`wormsoft/agent/low`), сжатие контекста
+(`openai/gpt-oss:20b`) — дешевле и быстрее, чем гонять на них главную
+модель.
+
+**Vision (`auxiliary.vision`) — переизбран эмпирически, 2026-08-03 (D-018):**
+
+```yaml
+auxiliary:
+  vision:
+    provider: main
+    model: wormsoft/vision/low
+    timeout: 120
+    reasoning_effort: ''
+    download_timeout: 30
+    fallback_chain:
+      - provider: main
+        model: wormsoft/vision/medium
+      - provider: main
+        model: google/gemma4:31b
+```
+
+Было `wormsoft/vision/high` — самая дорогая vision-модель у провайдера
+(`/v1/models` даже не перечисляет её, только тарифная страница дашборда;
+`wormsoft/agent/high`, для сравнения, не умеет vision вообще —
+`"capabilities":{"vision":false}`, подтверждено прямым запросом к API).
+Прогнали три модели (`wormsoft/vision/low`, `wormsoft/vision/medium`,
+`google/gemma4:31b`) на одном тестовом изображении (кириллический текст +
+диаграмма) через реальный вызов `chat/completions` — качество
+идентичное у всех трёх, `wormsoft/vision/low` быстрее (27 с против
+38–50 с) и **на порядки дешевле** остальных восьми моделей в тарифе.
+`fallback_chain` — не эскалация по качеству (Hermes такого не
+поддерживает, см. официальную документацию и разбор в D-018), а штатный
+механизм на отказы/рейт-лимиты. Полная методология и все цифры — D-018 в
+`docs/decisions.md`.
 
 ### 1.4 Docker-«клетка» вокруг агента (D-004) — `terminal:` в config.yaml
 
@@ -383,6 +414,20 @@ Hermes) и никогда не удаляются curator-процессом —
 |---|---|---|---|---|
 | `local-browser-rendering` | `software-development` | [hermes-harness/local-browser-rendering/SKILL.md](./local-browser-rendering/SKILL.md) | 2026-08-03 | Headless Chromium (через Playwright) + PDF/OCR-инструменты — агент может сфотографировать свой же локальный HTML/canvas и обеих тем, распознать текст со скриншота/PDF. Решение — D-017 в `docs/decisions.md`, подробности — раздел 3 этого файла. |
 | `school-task-analyzing` | `education` (новая категория, раньше не было) | [hermes-harness/school-task-analyzing/SKILL.md](./school-task-analyzing/SKILL.md) | 2026-08-03 | Формат и визуальный стиль разбора школьной/студенческой физической задачи как самостоятельной HTML-страницы: цветовая система под свето/тёмную тему, словарь блоков (`.problem`/`.principle`/`.case`/`.answer`/…), canvas-анимации на `requestAnimationFrame` (без библиотек) с типовыми сценариями (параметрическое движение, прочерчивание кривой, график величины от времени, векторы), чек-лист перед сдачей. Автор содержания — пользователь проекта, я только добавил технический frontmatter (см. примечание ниже). Использует `local-browser-rendering` для самопроверки (`related_skills`). |
+
+Три следующих — не наши скиллы «с нуля», а **патчи существующих
+self-authored скиллов Hermes** (агент сам их написал и с тех пор
+периодически патчит через `skills.creation_nudge_interval`, см. раздел
+1.3 config.yaml). Патчили точечно — вставляли `rapidocr-onnxruntime` как
+более дешёвый путь ДО `vision_analyze`, не переписывали накопленный
+агентом опыт (пометки про rate-limit-грабли `vision_analyze`, поиск
+задачника Черноуцана по зеркалам и т.п. — оставлены как есть).
+
+| Скилл | Категория на сервере | В этом репозитории | Правлен | Что изменено |
+|---|---|---|---|---|
+| `ocr-and-documents` | `productivity` (self-authored Hermes, v2.3.0→2.4.0) | [hermes-harness/ocr-and-documents/SKILL.md](./ocr-and-documents/SKILL.md) | 2026-08-03 | Главная «лестница» выбора инструмента для текста из PDF/сканов — раньше знала только `pymupdf` (без OCR) и `marker-pdf` (3-5 ГБ, часто непрактично в песочнице), из-за чего единственным реальным способом прочитать скан было дорогое `vision_analyze`. Добавлена третья строка в таблицу и отдельный раздел — `rapidocr-onnxruntime` как средний, лёгкий (~30 МБ) вариант по умолчанию для чистого текста. |
+| `scan-pdf-vision-ocr` | `productivity` (self-authored Hermes, v1.0.0→1.1.0) | [hermes-harness/scan-pdf-vision-ocr/SKILL.md](./scan-pdf-vision-ocr/SKILL.md) | 2026-08-03 | Добавлен «Step 2.5» — прогонять каждую отрендеренную страницу через rapidocr до `vision_analyze`; vision остаётся для фигур/графиков и страниц, где rapidocr дал брак. |
+| `scanned-document-recovery` | `productivity` (self-authored Hermes, v1.0.0→1.1.0) | [hermes-harness/scanned-document-recovery/SKILL.md](./scanned-document-recovery/SKILL.md) | 2026-08-03 | Условие срабатывания уточнено: раньше эту (дорогую, идёт искать зеркала в интернете) заглушку могло вызвать «rapidocr не пробовали», теперь — только «rapidocr реально дал пустой/битый результат на этом документе». |
 
 **Примечание к `school-task-analyzing`:** исходный файл не содержал
 YAML-frontmatter (`name`/`description`/`metadata`) — без него Hermes не
