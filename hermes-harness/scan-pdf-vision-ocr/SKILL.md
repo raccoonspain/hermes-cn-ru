@@ -1,7 +1,7 @@
 ---
 name: scan-pdf-vision-ocr
 description: "Use when a PDF is image-only (no text layer) and you need to read it, extract tasks/questions/figures, or assemble an md file. Renders pages with PyMuPDF, OCRs text with rapidocr-onnxruntime, uses vision_analyze for figures/graphs and pages rapidocr can't read, crops figures via PIL."
-version: 1.1.0
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -146,37 +146,71 @@ This caps the search at ~5 vision calls per task instead of OCRing the
 entire chapter. Empirically: hunting for one task in an 18-page scan
 costs 5–9 calls if you OCR everything, 2–3 calls with narrowing.
 
-### When vision image input is sandbox-blocked
+### Passing an image to vision_analyze — use a plain path, not manual base64
 
-Three modes, with a documented fallback that actually works in the
-Hermes sandbox:
+**Corrected 2026-08-03 after reading the actual current `vision_analyze`
+source** (`tools/image_source.py`, `tools/vision_tools.py` on this VPS) —
+the "~500 KB base64 cap, thumbnail to 640×640" advice below used to say
+was wrong, or at least badly out of date, and was costing real image
+quality for no reason. Verified facts, not guesses:
 
-1. `file://<absolute-path>` — fastest, no transfer. Works in most
-   sandboxes; try first.
-2. `http://localhost:<port>/<path>` via `python3 -m http.server` —
-   works in some sandboxes, **refused as "unsafe or private"** in
-   others (`browser_navigate` and `vision_analyze` both block it).
-3. Base64 data URL — accepted, but **the parameter payload is capped
-   around 500 KB**. Rendered textbook pages at DPI 120 are ~1.5 MB
-   base64 — too big. Fix: thumbnail to 640×640 before encoding.
+- `vision_analyze`'s `image_url` argument accepts a **plain file path,
+  a `file://` URI, an `http(s)://` URL, or a `data:` URL** — all four go
+  through one resolver (`resolve_image_source`).
+- Under `terminal.backend: docker` (this deployment), a path that only
+  exists inside your sandbox container is **still safely read** — the
+  resolver falls back to reading it *inside the sandbox* (same boundary
+  every other tool already has; can't escape to the host's `/etc/passwd`
+  etc.). This is a deliberate, security-reviewed design (references
+  GHSA-gpxw-6wxv-w3qq), not a fragile workaround — a plain path to a PNG
+  you just rendered under `/workspace` should just work.
+- The real size limits, enforced **after** Hermes reads the file
+  server-side: auto-resize if the base64 payload would exceed **5 MB**,
+  hard reject only above **20 MB**, plus a **7900 px** longest-side cap.
+  A rendered textbook page at DPI 150–300 is nowhere near any of these —
+  it will be sent at **full resolution**, unresized.
 
-Recipe for #3 when both `file://` and `localhost` are blocked:
+**So: just pass the plain path** (`/workspace/scan_pages/p09.png` or
+`file:///workspace/scan_pages/p09.png`) as `image_url`. Don't
+pre-encode to base64 yourself. Two reasons this matters, not just style:
+
+1. Quality — Hermes's own resize pipeline only kicks in near 5 MB /
+   7900 px, dramatically less lossy than a manual 640×640 thumbnail.
+   Blurring small graph labels/axis numbers to fit an imagined 500 KB
+   cap that doesn't exist directly hurts the transcription you're
+   trying to get right.
+2. Cost — if you build the base64 string yourself and pass it as the
+   tool-call argument, **the model has to generate that entire base64
+   blob as its own output tokens** to make the call. That's slow and
+   token-expensive well before any real server-side limit, which is the
+   likely true origin of the old "~500 KB" finding — not a payload cap,
+   but the practical cost of a model typing out hundreds of KB of
+   base64 text. A plain path avoids this entirely: Hermes reads and
+   encodes the bytes server-side, the model only emits a short string.
+
+**Only fall back to manual base64** if a plain path/`file://` genuinely
+errors in a specific session (report exactly what error — that's a real
+signal something changed, not something to route around silently). If
+it does, thumbnail as before, but treat it as the exception, not the
+default:
 
 ```python
 from PIL import Image
 import base64
 img = Image.open('/path/to/scan_p09.png')
-img.thumbnail((640, 640))
+img.thumbnail((1600, 1600))  # far more headroom than 640 — only shrink if you must
 img.save('/tmp/scan_small.png', 'PNG', optimize=True)
 with open('/tmp/scan_small.png', 'rb') as f:
     b64 = base64.b64encode(f.read()).decode()
 data_url = 'data:image/png;base64,' + b64
-# pass data_url as vision_analyze's image_url
 ```
 
-Quality loss at 640×640 is real — text becomes fuzzier. If you need
-exact numbers, fall back to `scanned-document-recovery` (search the web
-for the original textbook text) rather than fighting vision.
+If even that fails, `http://localhost:<port>/<path>` via
+`python3 -m http.server` is a middle option (some sandboxes block it as
+"unsafe or private" — `browser_navigate` and `vision_analyze` both
+check this the same way). Last resort: `scanned-document-recovery`
+(search the web for the original textbook text) rather than fighting
+vision on a degraded image.
 
 ## Step 4 — Crop figures and save them as PNG
 
