@@ -106,6 +106,8 @@
   .busy-status.on{display:flex}
   .busy-status .dot{width:6px;height:6px;border-radius:50%;background:var(--gold);animation:busy-pulse 1.1s ease-in-out infinite}
   @keyframes busy-pulse{0%,100%{opacity:.25}50%{opacity:1}}
+  #stopBtn{display:none;color:var(--red);border-color:var(--red)}
+  #stopBtn.on{display:flex}
 
   .side{position:relative; width:360px; flex-shrink:0; border-left:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0}
   .side .drag-handle{left:-3px}
@@ -188,6 +190,7 @@
         <div class="compose-resize-handle" id="composeResizeHandle"></div>
         <button class="icon-btn" id="attachBtn" title="прикрепить файлы">📎</button>
         <textarea id="composeInput" rows="1" placeholder="Написать Hermes… (Ctrl+V — вставить изображение из буфера)"></textarea>
+        <button class="icon-btn" id="stopBtn" title="остановить ход">⏹</button>
         <button class="send-btn" id="sendBtn" title="отправить">➤</button>
       </div>
       <input type="file" id="fileInput" multiple style="display:none">
@@ -221,6 +224,10 @@ let currentTree = null;
 let pendingAttachments = [];
 let currentEditorFile = null;
 let editorDirty = false;
+// Текущий AbortController активного хода — модульного уровня, чтобы
+// обработчик клика по STOP (отдельный от sendMessage()) мог до него
+// дотянуться. null, когда хода нет.
+let currentAbortController = null;
 const EDITOR_DISCARD_CONFIRM = 'Есть несохранённые изменения — открыть другой файл и потерять их?';
 
 function escapeHtml(s) {
@@ -795,6 +802,7 @@ async function uploadPending(files, targetDir) {
 async function sendMessage() {
   const input = document.getElementById('composeInput');
   const sendBtn = document.getElementById('sendBtn');
+  const stopBtn = document.getElementById('stopBtn');
   const busyStatus = document.getElementById('busyStatus');
   const busyStatusText = document.getElementById('busyStatusText');
   const text = input.value.trim();
@@ -804,10 +812,13 @@ async function sendMessage() {
   // messages, что гонится с параллельным readSSE-коллбэком второго хода.
   if (sendBtn.disabled) return;
   sendBtn.disabled = true;
+  stopBtn.classList.add('on');
   busyStatusText.textContent = 'Hermes думает…';
   busyStatus.classList.add('on');
   input.value = '';
   autosizeCompose();
+  currentAbortController = new AbortController();
+  let stoppedByUser = false;
 
   let fullText = text;
   if (pendingAttachments.length) fullText += `\n\n📎 ${pendingAttachments.map(a => a.relative_path).join(', ')}`;
@@ -828,6 +839,7 @@ async function sendMessage() {
         text: fullText,
         result_target: document.getElementById('resultTargetSelect').value || 'result',
       }),
+      signal: currentAbortController.signal,
     });
     if (resp.status === 401) { location.href = 'login.html'; return; }
     if (!resp.ok) {
@@ -882,6 +894,7 @@ async function sendMessage() {
       });
     } catch (err) {
       streamEndedCleanly = false;
+      stoppedByUser = err.name === 'AbortError';
     }
     // Соединение иногда рвётся раньше, чем агент реально закончил ход (долгая
     // тихая пауза — wormsoft.ru/докер). Бэкенд продолжает работать и допишет
@@ -889,12 +902,27 @@ async function sendMessage() {
     // гадать, сколько ещё сообщений придёт в этом ходе (см. Проблему 3 в
     // спеке — позиционное отслеживание несовместимо с переменным числом
     // сообщений за один ход).
-    if (streamEndedCleanly) await reconcileWithHistory();
-    else await recoverAfterStreamDrop();
+    if (streamEndedCleanly) {
+      await reconcileWithHistory();
+    } else if (stoppedByUser) {
+      // Осознанная остановка пользователем — не сетевой сбой, поэтому НЕ
+      // зовём recoverAfterStreamDrop() (он рассчитан на случайный обрыв и
+      // ждёт/опрашивает историю до MAX_WAIT_MS). Оставляем то, что уже было
+      // отрендерено вживую, с пометкой; один быстрый reconcileWithHistory()
+      // на случай, если Hermes всё же успел что-то сохранить в свою
+      // историю к этому моменту.
+      messages[assistantIdx].content += '\n\n⏹ _остановлено пользователем_';
+      renderMessages();
+      await reconcileWithHistory();
+    } else {
+      await recoverAfterStreamDrop();
+    }
     await refreshTreeAndFiles();
   } finally {
     sendBtn.disabled = false;
+    stopBtn.classList.remove('on');
     busyStatus.classList.remove('on');
+    currentAbortController = null;
   }
 }
 
@@ -997,6 +1025,9 @@ function initCompose() {
 }
 
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
+document.getElementById('stopBtn').addEventListener('click', () => {
+  if (currentAbortController) currentAbortController.abort();
+});
 document.getElementById('composeInput').addEventListener('input', autosizeCompose);
 document.getElementById('composeInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
