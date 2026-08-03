@@ -108,6 +108,7 @@
   @keyframes busy-pulse{0%,100%{opacity:.25}50%{opacity:1}}
   #stopBtn{display:none;color:var(--red);border-color:var(--red)}
   #stopBtn.on{display:flex}
+  #stopBtn:hover{color:var(--text);border-color:var(--text)}
 
   .side{position:relative; width:360px; flex-shrink:0; border-left:1px solid var(--panel-line); display:flex; flex-direction:column; min-height:0}
   .side .drag-handle{left:-3px}
@@ -902,7 +903,15 @@ async function sendMessage() {
         else if (name === 'error') { messages[assistantIdx].content = `Ошибка: ${payload.message || 'неизвестная'}`; renderMessages(); }
         else if (name === 'done') { streamEndedCleanly = true; }
         else if (name === 'tool.started' || name === 'tool.progress') {
+          // Инструмент может стартовать ПОСЛЕ того, как уже пришёл кусок
+          // текста (assistant.delta уже спрятал строку выше) — например,
+          // Hermes сначала пишет пару предложений, потом уходит в долгий
+          // молчаливый docker/vision-вызов. Без re-show строка «Hermes
+          // думает…»/«использует …» пропадает насовсем после первого
+          // delta и не возвращается именно на самых долгих и самых
+          // "тихих" участках хода — воспроизводит исходную жалобу.
           if (payload.tool_name) busyStatusText.textContent = `Hermes использует ${payload.tool_name}…`;
+          busyStatus.classList.add('on');
           appendActivity(name, payload);
         }
         else { appendActivity(name, payload); }
@@ -911,6 +920,20 @@ async function sendMessage() {
       streamEndedCleanly = false;
       stoppedByUser = err.name === 'AbortError';
     }
+    // STOP должен переставать быть "живым" сразу же, как только abort()
+    // реально на что-то влияет — то есть сразу после того, как поток так
+    // или иначе завершился, а не после reconcileWithHistory()/
+    // recoverAfterStreamDrop() (которые на сетевом обрыве могут крутиться
+    // до MAX_WAIT_MS = 25 минут). Иначе кнопка ⏹ всё это время выглядит
+    // нажимаемой, но клик по ней — no-op (currentAbortController.abort()
+    // на уже завершившийся fetch ничего не делает). sendBtn/composeInput
+    // намеренно остаются заблокированы до конца recovery-ветвления ниже —
+    // это отдельная защита от гонки с recoverAfterStreamDrop (см. комментарий
+    // в начале функции), STOP её не отменяет. Копии stopBtn/
+    // currentAbortController ниже в finally оставлены как страховка — они
+    // безвредны, если сюда уже добрались.
+    stopBtn.classList.remove('on');
+    currentAbortController = null;
     // Соединение иногда рвётся раньше, чем агент реально закончил ход (долгая
     // тихая пауза — wormsoft.ru/докер). Бэкенд продолжает работать и допишет
     // ответ в историю чата — целиком перечитываем историю вместо того, чтобы
@@ -928,7 +951,7 @@ async function sendMessage() {
       // историю к этому моменту.
       messages[assistantIdx].content += '\n\n⏹ _остановлено пользователем_';
       renderMessages();
-      await reconcileWithHistory();
+      await reconcileWithHistory({ onlyIfGrown: true });
     } else {
       await recoverAfterStreamDrop();
     }
@@ -941,7 +964,7 @@ async function sendMessage() {
   }
 }
 
-async function reconcileWithHistory() {
+async function reconcileWithHistory({ onlyIfGrown = false } = {}) {
   // Живая приёмка 2026-07-28 показала: Hermes шлёт message.started/
   // assistant.completed один раз на весь ход, а не на каждый шаг
   // многошагового хода (перевод по фразам, 3 шага → 1 событие каждого
@@ -949,11 +972,23 @@ async function reconcileWithHistory() {
   // остаётся лишь приблизительным "черновиком". После штатного event:
   // done бэкенд уже дописал всё в историю — всегда сверяем итог с
   // реальными данными, не полагаясь на догадки по SSE-событиям.
+  //
+  // onlyIfGrown: вызывается из STOP-ветки sendMessage() — там нет гарантии,
+  // что Hermes успел сохранить прерванный ход в свою историю (см. спек,
+  // "Известный риск"). Если нет — GET .../messages вернёт историю ДО хода,
+  // короче того, что уже отрендерено вживую (partial-ответ +
+  // пометка «⏹ остановлено пользователем»), и её нельзя молча принимать —
+  // это стёрло бы с экрана то, что явно обещано спеком оставлять видимым.
+  // Правило симметрично уже существующему в recoverAfterStreamDrop
+  // (fresh.length сравнивается с messages.length перед тем, как доверять
+  // ответу).
   const histResp = await apiFetch(`/api/chat/${encodeURIComponent(chatSessionId)}/messages`);
   if (histResp.status === 401) { location.href = 'login.html'; return; }
   if (!histResp.ok) return;
   const histBody = await histResp.json();
-  messages = histBody.data.filter(m => m.role === 'user' || m.role === 'assistant');
+  const fresh = histBody.data.filter(m => m.role === 'user' || m.role === 'assistant');
+  if (onlyIfGrown && fresh.length < messages.length) return; // Hermes ещё не сохранил ход — не затираем то, что уже на экране
+  messages = fresh;
   renderMessages();
 }
 
