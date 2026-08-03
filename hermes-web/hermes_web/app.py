@@ -185,6 +185,13 @@ async def handle_send_message(request: web.Request) -> web.StreamResponse:
                     await pending
                 except BaseException:
                     pass
+    except ConnectionResetError:
+        # Клиент оборвал соединение — либо ушёл со страницы, либо нажал
+        # STOP (project-workspace.html). finally выше уже отменил pending,
+        # что закрыло наш запрос к Hermes API и дало ему кооперативно
+        # остановить ход. Дальше писать в response нельзя — клиента уже
+        # нет, это штатный путь после этой задачи, не ошибка сервера.
+        logger.debug("chat_session_id=%s: клиент оборвал соединение во время хода", chat_session_id)
     except (quickchat.QuickChatError, hermes_client.HermesClientError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
         # response.prepare() выше уже отправил 200 text/event-stream — на этом
         # этапе упасть с необработанным исключением нельзя: клиент останется

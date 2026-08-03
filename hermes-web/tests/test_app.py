@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 import aiohttp
 import pytest
@@ -265,6 +266,66 @@ async def test_send_message_stops_advancing_generator_after_write_failure(aiohtt
     # Дать шанс возможной утечённой фоновой задаче продвинуть генератор дальше.
     await asyncio.sleep(0.05)
     assert advanced == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_send_message_disconnect_while_waiting_cancels_pending_and_logs_debug(
+    aiohttp_client, app_and_conn, monkeypatch, caplog,
+):
+    # STOP (или просто уход со страницы) в момент, когда мы ещё ЖДЁМ
+    # следующее событие от Hermes (pending ещё не done, идёт heartbeat-
+    # ожидание) — обрыв в этот момент должен: (1) реально отменить
+    # ожидающий agen.__anext__() (что закрывает наш HTTP-запрос к Hermes и
+    # даёт ему кооперативно остановить ход — механизм уже существует в
+    # finally, здесь только характеризуется как регрессионный тест); (2) не
+    # всплыть необработанным исключением из handle_send_message, а тихо
+    # залогироваться на уровне DEBUG (это то, что чинит эта задача).
+    monkeypatch.setattr("hermes_web.app.HEARTBEAT_INTERVAL", 0.05)
+    events = []
+
+    async def fake_send_message(db_conn, http_session, config, chat_session_id, text):
+        yield "assistant.delta", {"delta": "one"}
+        try:
+            await asyncio.sleep(10)
+            events.append("finished-uncancelled")
+        except asyncio.CancelledError:
+            events.append("cancelled")
+            raise
+        yield "done", {}
+
+    monkeypatch.setattr("hermes_web.app.quickchat.send_message", fake_send_message)
+
+    original_write = web.StreamResponse.write
+    calls = {"n": 0}
+
+    async def flaky_write(self, data):
+        calls["n"] += 1
+        # 1-й write — "event: assistant.delta" из первого yield (должен
+        # пройти). 2-й write — это уже пинг heartbeat во время 10-секундного
+        # сна fake_send_message, то есть pending реально не done в этот
+        # момент — именно тот случай, который отличается от уже
+        # протестированного test_send_message_stops_advancing_generator_after_write_failure.
+        if calls["n"] == 2:
+            raise ConnectionResetError("simulated client disconnect while waiting on Hermes")
+        return await original_write(self, data)
+
+    monkeypatch.setattr(web.StreamResponse, "write", flaky_write)
+
+    caplog.set_level(logging.DEBUG, logger="hermes_web.app")
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    try:
+        await client.post("/api/chat/chat1/send", json={"text": "привет"})
+    except Exception:
+        pass  # обрыв на сервере может выглядеть с этой стороны по-разному — важны server-side эффекты ниже
+
+    await asyncio.sleep(0.05)
+    assert events == ["cancelled"]
+    debug_records = [r for r in caplog.records if r.name == "hermes_web.app" and r.levelno == logging.DEBUG]
+    assert any("chat1" in r.getMessage() for r in debug_records)
+    error_records = [r for r in caplog.records if r.name == "hermes_web.app" and r.levelno >= logging.ERROR]
+    assert error_records == []
 
 
 @pytest.mark.asyncio
