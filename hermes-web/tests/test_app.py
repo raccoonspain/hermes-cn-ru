@@ -316,11 +316,12 @@ async def test_send_message_disconnect_while_waiting_cancels_pending_and_logs_de
     client = await aiohttp_client(app_and_conn)
     await client.post("/login", json={"username": "dem", "password": "secret123"})
     try:
-        await client.post("/api/chat/chat1/send", json={"text": "привет"})
+        resp = await client.post("/api/chat/chat1/send", json={"text": "привет"})
+        await resp.read()  # дождаться, пока сервер реально закроет поток — иначе client.post()
+                            # возвращается сразу после заголовков, обгоняя server-side отмену/cleanup
     except Exception:
         pass  # обрыв на сервере может выглядеть с этой стороны по-разному — важны server-side эффекты ниже
 
-    await asyncio.sleep(0.05)
     assert events == ["cancelled"]
     debug_records = [r for r in caplog.records if r.name == "hermes_web.app" and r.levelno == logging.DEBUG]
     assert any("chat1" in r.getMessage() for r in debug_records)
