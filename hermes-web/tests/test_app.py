@@ -330,6 +330,44 @@ async def test_send_message_disconnect_while_waiting_cancels_pending_and_logs_de
 
 
 @pytest.mark.asyncio
+async def test_send_message_upstream_reset_while_browser_still_attached_sends_error_and_done(
+    aiohttp_client, app_and_conn, monkeypatch, caplog,
+):
+    # Регрессия финального ревью (Important #1): aiohttp.ClientConnectionResetError
+    # — то, чем реально может упасть поход к Hermes при обрыве соединения со
+    # шлюзом (например, gateway перезапускается на середине хода) — является
+    # ПОДКЛАССОМ И aiohttp.ClientError, И встроенного ConnectionResetError
+    # одновременно. Раньше это означало, что такой upstream-сбой попадал в
+    # except ConnectionResetError (предназначенный для обрыва связи с
+    # БРАУЗЕРОМ) и тихо проглатывался на DEBUG — поток обрывался без
+    # "event: error"/"event: done", хотя браузер всё ещё был подключён и
+    # ждал. Здесь запись в response (клиенту) НЕ подменяется — она должна
+    # проходить нормально — а исключение бросается из самого генератора
+    # quickchat.send_message, то есть с "upstream"-стороны.
+    caplog.set_level(logging.DEBUG, logger="hermes_web.app")
+
+    async def fake_send_message(db_conn, http_session, config, chat_session_id, text):
+        yield "assistant.delta", {"delta": "part"}
+        raise aiohttp.ClientConnectionResetError("Cannot write to closing transport")
+        yield  # pragma: no cover — делает функцию async-генератором
+
+    monkeypatch.setattr("hermes_web.app.quickchat.send_message", fake_send_message)
+
+    client = await aiohttp_client(app_and_conn)
+    await client.post("/login", json={"username": "dem", "password": "secret123"})
+    resp = await client.post("/api/chat/chat1/send", json={"text": "привет"})
+    assert resp.status == 200
+    body = (await resp.read()).decode("utf-8")
+    assert "event: assistant.delta" in body
+    assert "event: error" in body
+    assert "event: done" in body
+    # И это НЕ должно было залогироваться как "клиент оборвал соединение" —
+    # браузер тут ни при чём, это Hermes-сторона.
+    debug_records = [r for r in caplog.records if r.name == "hermes_web.app" and r.levelno == logging.DEBUG]
+    assert not any("клиент оборвал соединение" in r.getMessage() for r in debug_records)
+
+
+@pytest.mark.asyncio
 async def test_send_message_no_heartbeat_noise_when_events_arrive_promptly(aiohttp_client, app_and_conn, monkeypatch):
     async def fake_send_message(db_conn, http_session, config, chat_session_id, text):
         yield "assistant.delta", {"delta": "ok"}

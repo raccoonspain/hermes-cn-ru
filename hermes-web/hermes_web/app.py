@@ -31,6 +31,25 @@ RATE_LIMIT_WINDOW_SECONDS = 300
 HEARTBEAT_INTERVAL = 15.0
 
 
+class _ClientGone(Exception):
+    """Внутренний маркер: запись в SSE-поток браузера не удалась, потому что
+    браузер уже отвалился (STOP или уход со страницы). Заведён отдельно от
+    ConnectionResetError/aiohttp.ClientConnectionResetError, потому что тот
+    же самый тип исключения бросает и aiohttp-клиент при обрыве СВЯЗИ С
+    HERMES (ClientConnectionResetError — подкласс и ClientError, и
+    ConnectionResetError одновременно, см. hermes_web/tests/test_app.py) —
+    по типу исключения эти два случая неразличимы, поэтому различаем по
+    месту: только запись именно в response (клиенту) помечается этим
+    маркером, см. _write_to_client ниже."""
+
+
+async def _write_to_client(response: web.StreamResponse, data: bytes) -> None:
+    try:
+        await response.write(data)
+    except ConnectionResetError as exc:
+        raise _ClientGone from exc
+
+
 def _require_user(request: web.Request) -> dict:
     user = request.get("user")
     if user is None:
@@ -164,14 +183,14 @@ async def handle_send_message(request: web.Request) -> web.StreamResponse:
             while True:
                 done, _ = await asyncio.wait({pending}, timeout=HEARTBEAT_INTERVAL)
                 if not done:
-                    await response.write(b": ping\n\n")
+                    await _write_to_client(response, b": ping\n\n")
                     continue
                 try:
                     name, payload = pending.result()
                 except StopAsyncIteration:
                     break
                 data = json.dumps(payload, ensure_ascii=False)
-                await response.write(f"event: {name}\ndata: {data}\n\n".encode("utf-8"))
+                await _write_to_client(response, f"event: {name}\ndata: {data}\n\n".encode("utf-8"))
                 # Следующий __anext__() планируем ТОЛЬКО после успешной записи
                 # текущего payload. Если планировать его раньше и запись упадёт
                 # (клиент уже отвалился), уже стартовавшая фоновая задача всё
@@ -185,12 +204,20 @@ async def handle_send_message(request: web.Request) -> web.StreamResponse:
                     await pending
                 except BaseException:
                     pass
-    except ConnectionResetError:
+    except _ClientGone:
         # Клиент оборвал соединение — либо ушёл со страницы, либо нажал
         # STOP (project-workspace.html). finally выше уже отменил pending,
         # что закрыло наш запрос к Hermes API и дало ему кооперативно
         # остановить ход. Дальше писать в response нельзя — клиента уже
         # нет, это штатный путь после этой задачи, не ошибка сервера.
+        #
+        # Важно: ловим именно _ClientGone (см. определение выше), а не
+        # ConnectionResetError напрямую — aiohttp.ClientConnectionResetError
+        # (обрыв связи С HERMES, не с браузером) тоже является подклассом
+        # ConnectionResetError, и ловля по типу исключения не отличила бы
+        # "браузер ушёл" от "Hermes оборвал соединение": такой обрыв должен
+        # попасть в except ниже и уйти клиенту как "event: error"/"done",
+        # а не молча проглотиться на DEBUG.
         logger.debug("chat_session_id=%s: клиент оборвал соединение во время хода", chat_session_id)
     except (quickchat.QuickChatError, hermes_client.HermesClientError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
         # response.prepare() выше уже отправил 200 text/event-stream — на этом
