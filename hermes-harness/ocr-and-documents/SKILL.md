@@ -1,7 +1,7 @@
 ---
 name: ocr-and-documents
 description: "Extract text from PDFs/scans (pymupdf, marker-pdf)."
-version: 2.5.0
+version: 2.6.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -37,7 +37,7 @@ Only use local extraction when: the file is local, web_extract fails, or you nee
 |---------|-----------------|-------------------------------|---------------------|
 | **Text-based PDF** | ✅ | n/a (image input only) | ✅ |
 | **Scanned PDF (OCR)** | ❌ | ✅ (plain text only) | ✅ (90+ languages) |
-| **Cyrillic** | n/a | ✅ out of the box | ✅ |
+| **Cyrillic** | n/a | ⚠️ default model can't (see below) — ✅ with bundled Cyrillic model | ✅ |
 | **Tables** | ✅ (basic) | ❌ | ✅ (high accuracy) |
 | **Equations / LaTeX** | ❌ | ❌ | ✅ |
 | **Code blocks** | ❌ | ❌ | ✅ |
@@ -55,10 +55,14 @@ Only use local extraction when: the file is local, web_extract fails, or you nee
 **Decision**: pymupdf for text-based PDFs (instant, no OCR needed). For **scanned pages, photographed
 worksheets, or screenshots where you only need the text** (no tables/equations/layout) — use
 **rapidocr-onnxruntime first**, not marker-pdf and not `vision_analyze`: a ~30MB pure-Python install
-(no PyTorch, no multi-GB download, no LLM round-trip), Cyrillic out of the box, already installed in
+(no PyTorch, no multi-GB download, no LLM round-trip), already installed in
 this sandbox as of 2026-08-03 (part of the `local-browser-rendering` skill's toolchain — if
 `import rapidocr_onnxruntime` fails, self-heal with `pip install rapidocr-onnxruntime`, no root
-needed). Reach for `marker-pdf` only when you actually need tables, equations, or reading-order-aware
+needed). **On Cyrillic (Russian) text, the default model does not work** — it has no Cyrillic in
+its vocabulary and silently emits Latin lookalikes instead (`С`→`C`, `Н`→`H`...) rather than failing
+loudly. Use `scan-pdf-vision-ocr`'s bundled `models/rapidocr-cyrillic/config.yaml` via
+`RapidOCR(config_path=...)` for any Cyrillic document — see that skill's Step 2.5 (root cause and fix:
+D-022, 2026-08-05). Reach for `marker-pdf` only when you actually need tables, equations, or reading-order-aware
 markdown from a scan — those are real gaps in rapidocr, not marker-pdf being generally "better OCR".
 Reach for `vision_analyze` on a scanned page only when rapidocr's output looks wrong/garbled on
 inspection, or the task needs genuine visual understanding (a diagram, a graph, handwriting rapidocr

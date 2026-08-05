@@ -3,7 +3,7 @@ name: scan-pdf-vision-ocr
 description: "Use when a PDF is image-only (no text layer) and you need to read it, extract tasks/questions/figures, or assemble an md file. Renders pages with PyMuPDF, OCRs text with rapidocr-onnxruntime, uses vision_analyze for figures/graphs and pages rapidocr can't read, crops figures via PIL."
 tags: ["PDF", "OCR", "vision", "scans", "textbook", "images", "markdown"]
 related_skills: ["ocr-and-documents", "pdf", "vision_analyze"]
-version: 1.6.0
+version: 1.8.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -14,6 +14,8 @@ metadata:
     pointers:
       - references/render-and-crop.md    # PyMuPDF render + PIL crop recipes
       - references/embedded-jpeg-rotation.md  # 90°-rotated JPEG inside scanned PDF (added 2026-08-05)
+      - references/cyrillic-homoglyph-recovery.md  # FALLBACK ONLY as of 2026-08-05 — superseded by models/rapidocr-cyrillic/, see D-022
+      - models/rapidocr-cyrillic/config.yaml  # bundled cyrillic_PP-OCRv5_mobile_rec model, use as RapidOCR(config_path=...) on Cyrillic docs (added 2026-08-05, D-022)
       - references/kirik-session.md      # kirik-kinematika concrete lessons
       - references/galanz-aerogril-session.md  # 3-page scan → RU .docx, two-column OCR fix, vision 400
       - references/graph-curve-extraction.md  # pure-PIL graph data recovery when vision is down
@@ -163,16 +165,45 @@ you should be running is already in this skill.
 ## Step 2.5 — Try rapidocr-onnxruntime BEFORE vision (added 2026-08-03)
 
 As of 2026-08-03 this sandbox has `rapidocr-onnxruntime` installed (pure
-Python, ~30MB, Cyrillic out of the box, no LLM round-trip — see
-`ocr-and-documents`). Run it on each rendered page **before** spending a
-`vision_analyze` call on plain text:
+Python, ~30MB, no LLM round-trip — see `ocr-and-documents`). Run it on
+each rendered page **before** spending a `vision_analyze` call on plain
+text.
+
+**On a Cyrillic (Russian) document, use the Cyrillic recognition model,
+not the stock default (root-caused and fixed 2026-08-05, see D-022).**
+The default `rapidocr_onnxruntime` ships only `ch_PP-OCRv4_rec_infer.onnx`
+(Chinese+English) — it does **not** read Cyrillic "out of the box" despite
+what older versions of this doc claimed. On Cyrillic text it silently
+emits visually-similar Latin homoglyphs instead (С→C, Н→H, О→O, ...),
+producing readable-*looking* garbage that requires expensive manual
+line-by-line reconstruction — see the "rapidocr mangles Cyrillic into
+Latin homoglyphs" Pitfall below, kept as a documented fallback recipe for
+when the Cyrillic model isn't available. A pre-downloaded Cyrillic model
+(`cyrillic_PP-OCRv5_mobile_rec`) is bundled with this skill under
+`models/rapidocr-cyrillic/` — point `RapidOCR` at its `config_path` and
+it reads Cyrillic directly, no homoglyph decoding needed:
 
 ```python
 from rapidocr_onnxruntime import RapidOCR
-engine = RapidOCR()
+
+# Cyrillic docs — bundled model, reads Russian directly:
+engine = RapidOCR(config_path=(
+    "/root/.hermes/skills/productivity/scan-pdf-vision-ocr/"
+    "models/rapidocr-cyrillic/config.yaml"
+))
+# Non-Cyrillic docs (Latin/Chinese) — stock default is fine:
+# engine = RapidOCR()
+
 result, _ = engine(f'{out}/p{i+1:02d}.png')
 text = "\n".join(line[1] for line in result)
 ```
+
+If you don't yet know the document's script when you first call this,
+render page 1, run stock `RapidOCR()` on it, and eyeball one line — if it
+comes back as Latin-lookalike gibberish on what is visibly a Cyrillic
+scan, that's the signal to switch to the bundled Cyrillic config for the
+rest of the pages. Don't burn a `vision_analyze` call just to detect the
+script.
 
 If `text` looks complete and coherent for the page (task numbers present,
 no obvious garbling) — use it directly, skip `vision_analyze` for that
@@ -190,8 +221,11 @@ This does not replace the vision workflow below — it removes the *text*
 half of the work from most pages, so `vision_analyze` calls in Step 3 are
 mostly reserved for figures and the pages rapidocr got wrong. If
 `import rapidocr_onnxruntime` fails, self-heal with
-`pip install rapidocr-onnxruntime` (no root needed) before falling back to
-vision for everything.
+`pip install rapidocr-onnxruntime` (no root needed) before falling back
+to vision for everything. If `models/rapidocr-cyrillic/` is missing
+(fresh sandbox, not yet re-synced), fall back to the homoglyph-recovery
+Pitfall below rather than blocking — but flag it to the user, this bundled
+model should exist and its absence means something didn't sync.
 
 ## Step 3 — Locate content with `vision_analyze`
 
@@ -375,6 +409,15 @@ Embed the cropped PNGs with relative `./` paths so the md is portable.
   opportunistic, not required. If rapidocr also cannot read the page
   (handwriting, very low-DPI), escalate to the user with a small JPEG
   crop + "Перечитай этот кусок, пожалуйста" request — not to vision.
+- **rapidocr mangles Cyrillic into Latin homoglyphs when run with the stock (default) model — root-caused and FIXED 2026-08-05, see D-022. Use the bundled `models/rapidocr-cyrillic/config.yaml` (documented in Step 2.5 above) instead of this whole recipe.** Root cause: the default `rapidocr_onnxruntime` recognition model (`ch_PP-OCRv4_rec_infer.onnx`) is a Chinese+English model with no Cyrillic characters in its vocabulary at all — it isn't "confused" by Cyrillic, it structurally cannot output it, so it snaps every Cyrillic glyph to the nearest Latin lookalike in its own character set. Symptom: rapidocr returns readable-looking text, but every Cyrillic letter has been silently replaced by its Latin lookalike. You get `CTPOH AnbAHC` instead of `СТРОН Альянс`, `BeIyLIeMy 3KOHOMHCTY` instead of `Ведущему экономисту`, `193 TK PΦ` instead of `193 ТК РФ`. This is what verified as a real bug on a Russian official letter (single-page 2409×3437 scan) on 2026-08-05, before the fix. **The rest of this bullet is the OLD manual-recovery recipe — keep it only as a fallback for a sandbox where `models/rapidocr-cyrillic/` hasn't synced yet.** Recovery recipe that worked in that session:
+
+  1. **Don't trust rapidocr alone on Cyrillic.** Run it, but treat the output as a coordinate map + a cipher, never as final text.
+  2. **Rescue small/signature zones with a high-zoom crop + re-OCR.** Tiny text (signatures, dates, реквизиты) reads worst. Crop a tight rectangle (e.g. `Image.crop((1700, 2480, 2300, 2620))`), `resize(..., Image.LANCZOS)` to 2–3×, save to PNG, re-OCR. Confidence scores help — `conf > 0.85` on the homoglyph string is reliable enough to be unambiguous after manual reconstruction.
+  3. **Reconstruct Russian manually.** For each line, use the standard homoglyph map (С→С, Н→Н, О→О, Е→Е, А→А, Т→Т, К→К, М→М, Р→р, У→у, В→В, Х→х, Л→Л, Ы→Ы, Э→Э, Ю→Ю, Я→Я, Ж→Ж, Ь→ь, Г→г, Д→Д, Б→Б, И→И, Ш→Ш, Щ→Щ, Ф→Ф, П→П, Ч→Ч). Use legal/professional vocabulary, common Russian surnames and patronymics, and context (article numbers, contract numbers, dates) to anchor the reconstruction. For ambiguous spots (rare surname, abbreviated org), **mark `⚠`** in the final md and ask the user.
+  4. **Split into vertical bands for layout stability.** One OCR pass on the whole downscaled image (1400×2000 from 2409×3437) misses fine detail in header/sign zones. Splitting into 5–6 horizontal bands and OCR-ing each at full resolution then merging by Y-coordinate gives cleaner per-region results.
+  5. **Always save the original scan as an attachment.** Path: `result/attachments/<name>_p1.jpeg` (or whatever extension). The user MUST be able to pull it up and check any ⚠-marked spot against the source — for legal documents this isn't optional.
+  6. **Don't loop on `vision_analyze` retry.** When vision returns 400 on a Russian document, the fastocr-via-rapidocr path is your friend. Vision's value here is in *layout questions* ("which task numbers are on this page"), not in *transcription* of a document rapidocr can already read (in homoglyph form).
+  7. **In the final md**, mark every uncertain reconstruction with `⚠` in a dedicated table — name/abbreviation/date that OCR couldn't pin down. Tell the user explicitly: "это юридический документ, любая ошибка OCR критична, сверяйте по скану". Better one round of clarification than a confidently-wrong explanation that goes into a real labor dispute file.
 - **Embedded JPEG in scanned PDF may be rotated 90° relative to the page (verified 2026-08-05 on a children's picture book).** `doc.extract_image(xref)` returns the **raw** JPEG bytes — dimensions are the image's native orientation. But the image may be placed on the page via a transformation matrix so `page.get_image_rects(xref)` returns a bbox rotated 90° relative to the page rect. Symptom that the user will report verbatim: *"Особенно, если картинка повернута на 90 градусов"* — and they will also complain that *"Вставлять целиком страницу скана с английским языком — это бред"* if you don't catch and rotate.
 
   Detection:
