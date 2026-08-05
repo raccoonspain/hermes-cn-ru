@@ -1,7 +1,7 @@
 ---
 name: scanned-document-recovery
 description: "Use when a PDF/image is a scan (no text layer) AND local OCR fails or is unavailable — find an online mirror or problem-bank that already has the text."
-version: 1.1.0
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -75,8 +75,9 @@ PDF is a single-page scan of one problem set; local OCR dead; `vision_analyze` t
 
 - **Don't try to install marker-pdf in a no-disk / no-sudo environment.** It'll fail and waste 5–10 minutes. Spot-check with `df -h` and `which tesseract` first.
 - **`browser_click` on a plain link-text node often doesn't navigate** in headless mode. Inspect the `href` and `browser_navigate` directly. (When in doubt, use `browser_console` to extract all links in one go.)
-- **`vision_analyze` can silently time out** on large scans (>1MB PNG) with no error to the agent. If you've been waiting >60s on a vision call, treat it as failed and move on.
+- **`vision_analyze` can silently time out** on large scans (>1MB PNG) with no error to the agent. A single call hanging >60s is a signal to check on it, **not** a signal to give up on vision entirely — see the backoff ladder below before jumping to the mirror-search fallback. This skill's actual trigger is "vision has been down for a while AND a public mirror plausibly exists", not "one call felt slow".
 - **`vision_analyze` on parallel batches has rate limits**. If you spam 10 calls at once, some will fail with `Request timed out` or `Connection error`. Retry the failed ones individually with a brief gap.
+- **If `vision_analyze` is genuinely down (timeout/429/500), don't retry once and move on — follow the backoff ladder** from `scan-pdf-vision-ocr`'s "Provider degraded" section: write to chat, sleep `30s → 1m → 5m → 15m → 30m → 1h → 2h`, retry (≈3h51m total, just under the 4h wormsoft.ru credit window). **This skill (mirror search) is a legitimate parallel/first move if a mirror plausibly exists** — no reason to block on vision if the same text is one search away — but don't reach for it as a shortcut past the ladder just because a vision call felt slow. If the ladder exhausts and no mirror exists either, that's genuinely stuck — follow `series-task-workflow`'s unattended-continuation section instead of idling.
 - **Don't OCR the whole book for one task**. If the user asks for "task 3.20", find which page chapter 3 starts on first, then vision only that page-range.
 - **`web_extract` cannot fetch JS-rendered pages.** If the mirror renders problem text only after JS, use the browser, not `web_extract`.
 - **Watch the disk**. `pip install easyocr` pulls `torch` ~526 MB, which may exceed the tmpfs `/tmp` (often 512 MB) even when overlayfs has 70 GB free. Set `TMPDIR=/workspace/tmp` and `PIP_NO_CACHE_DIR=1` if you must try, but prefer the mirror approach first.

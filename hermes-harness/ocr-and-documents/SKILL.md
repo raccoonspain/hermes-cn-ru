@@ -1,7 +1,7 @@
 ---
 name: ocr-and-documents
 description: "Extract text from PDFs/scans (pymupdf, marker-pdf)."
-version: 2.4.0
+version: 2.5.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -64,6 +64,11 @@ Reach for `vision_analyze` on a scanned page only when rapidocr's output looks w
 inspection, or the task needs genuine visual understanding (a diagram, a graph, handwriting rapidocr
 mangled) rather than transcription — see `scan-pdf-vision-ocr` for that workflow, but try rapidocr
 before it, not instead of it.
+
+**If `vision_analyze` itself times out or errors (429/500)** — don't retry
+once and move on, and don't proceed on a guess. Follow the backoff ladder in
+`scan-pdf-vision-ocr`'s "Provider degraded" section (write to chat, sleep
+30s→1m→5m→15m→30m→1h→2h, retry) — same rule here, not repeated in full.
 
 ```python
 from rapidocr_onnxruntime import RapidOCR
