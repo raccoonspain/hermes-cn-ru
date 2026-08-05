@@ -1485,3 +1485,159 @@ ocr` про передачу картинки: путь/`file://` теперь �
 свериться, действительно ли путь/`file://` у него отказал, или он
 просто не попробовал.
 
+---
+
+## D-020 · Ревизия скиллов по факту использования + первопричина «HOME теряется в docker-песочнице» + docx/xlsx/pptx довооружены
+
+**Контекст.** Пользователь попросил перевода Hermes'ом отсканированной
+инструкции на русский (PDF → Word) — агент справился, но живым скрином
+показал ту же картину, что уже чинили в D-018: перебор `pdftotext` →
+`pdfplumber` → `pypdfium2` → `tesseract` → `rapidocr` вслепую, с
+загадочным `No space left on device` при формально свободных 64 ГБ, и
+переустановкой `python-docx`, который «слетел при удалении `.pylibs`».
+По итогам пользователь задал два отдельных, но связанных вопроса: (1)
+разобрать все скиллы агента по пользе (запланировано ещё 3 августа,
+раздел 6 `hermes-harness/MAIN.md`, не начато) и выключить лишние; (2)
+после того как оставил `powerpoint`/`xlsx` в дашборде на будущее —
+выяснить, что нужно доставить, чтобы они реально работали, и как это
+бьётся с «клеткой» (D-004).
+
+### Часть 1 — ревизия 76 скиллов по реальному `use_count`, не по догадке
+
+Вместо того чтобы гадать, какими скиллами пользуется агент, прочитан
+`~/.hermes/skills/.usage.json` — Hermes сам считает `use_count`/
+`last_used_at` на каждый скилл с момента установки (31 июля). Из **76**
+файлов `SKILL.md` на диске (72 официально видны `hermes skills list —
+source all`: 65 bundled + 7 self-authored/local) реально использовались
+**только 13** за неделю живой работы: наши 7 self-authored (`scan-pdf-
+vision-ocr` 36 раз, `school-task-analyzing`/`html-page-bundle` по 11,
+`local-browser-rendering` 5, `scanned-document-recovery` 4,
+`multi-task-analysis-series`/`series-task-workflow` по 1) и 6 bundled
+(`ocr-and-documents` 5, `pdf` 3, `simplify-code` 2, `claude-design`/
+`docx`/`hermes-agent` по 1). Остальные 62 — `use_count: 0` с момента
+установки, включая целые категории (`mlops`, `research`, `github`,
+`smart-home`, `social-media`, `email`), не относящиеся к тому, как
+реально используется этот Hermes (личный ассистент + разбор физики +
+работа с документами, не ML-инженерия и не разработка через сам
+Hermes-чат).
+
+**Отдельная находка по пути:** 4 скилла `apple/*` (`apple-notes`,
+`apple-reminders`, `findmy`, `imessage`) физически лежали на диске, но
+`hermes skills list` их вообще не видел — не зарегистрированы как
+installed (видимо, руками занесены кем-то в прошлом мимо `hermes skills
+install`), поэтому и не появлялись в веб-дашборде для выключения.
+`hermes skills inspect apple-notes` подтвердил: `"os": ["darwin"]` —
+100% нерабочие на этом Linux VPS независимо от `use_count`. Удалены
+напрямую (`rm -rf ~/.hermes/skills/apple`, обычным `hermes`, без root —
+директория и так его).
+
+**Также найдена и будет исправлена неточность в наших же записях:**
+D-018/`hermes-harness/MAIN.md` называют `ocr-and-documents` self-authored
+скиллом Hermes — по факту `hermes skills list --source builtin`
+показывает его как **bundled**. Self-authored (`source: local`) из этой
+тройки только `scan-pdf-vision-ocr` и `scanned-document-recovery`.
+
+**Решение по выключению.** Пользователь управляет включением/выключением
+сам через штатный веб-дашборд Hermes (`hermes skills config` — то же
+самое штатно, но интерактивно). Наша роль — дать список по факту
+`use_count`, не выключать самим (кроме `apple/*`, которые в дашборде и
+так не видны). Пользователь по итогам оставил `powerpoint`/`xlsx`
+включёнными сверх списка использованных — планирует презентации и
+таблицы, отсюда часть 2.
+
+### Часть 2 — первопричина: `docker`-backend терминала никогда не
+выставляет `HOME`
+
+Прочитан код `~/.hermes/hermes-agent` на сервере (не документация — тот
+же метод, что D-019). `hermes_constants.get_subprocess_home()` (политика
+`terminal.home_mode`, default `auto`) резолвит `HOME` в
+`{HERMES_HOME}/home` для любого backend, работающего в контейнере — это
+подтверждённый `docker inspect` bind-mount на `/root` внутри песочницы
+(`/home/hermes/.hermes/sandboxes/docker/<profile>/home → /root`), тот
+самый durable-путь, где с 3 августа (D-017/018) уже лежал
+`rapidocr-onnxruntime`. Но **`apply_subprocess_home_env()` вызывается в
+`tools/environments/local.py` и `tools/code_execution_tool.py` — и ни
+разу не в `tools/environments/docker.py`** (grep на `HOME` по файлу — 0
+совпадений). У нас `terminal.backend: docker` — то есть шелл-команды,
+которые реально печатает модель, никогда не получали `HOME=/root`,
+только дефолт контейнера (`HOME=/`, подтверждено прямым `docker exec`).
+Отсюда: `pip install --user` уходил в `/.local`, не находил уже
+поставленный `rapidocr` в `/root/.local`, и агент был вынужден сам
+изобретать обходной путь — ставить пакеты в `.pylibs/` внутри папки
+конкретного проекта, теряя их при следующем чате и тратя ходы/место
+заново на то же самое.
+
+**Решение — штатный конфиг-ключ, без патча кода агента.**
+`terminal.docker_env` (`{}` по умолчанию, документирован в
+`hermes_cli/config.py` как «explicit environment variables to set inside
+Docker containers») — добавлено:
+
+```yaml
+terminal:
+  docker_env:
+    HOME: /root
+```
+
+Бэкап `config.yaml` снят перед правкой. `docker_env` применяется только
+при инициализации сессии контейнера (`init_session`, снапшот `export -p`
+переиспользуется дальше без повторных `-e`-флагов) — уже запущенные
+персистентные контейнеры (`container_persistent: true`, живут неделями)
+его не подхватывают задним числом. Поэтому после чистого рестарта
+`hermes-gateway.service` оба активных контейнера-песочницы
+(`hermes-4d11e9c2`/`hermes-b4c63120`) намеренно остановлены и удалены
+(`docker stop && docker rm`), чтобы Hermes создал их заново с новым
+конфигом. Проверено не гипотезой, а живым сквозным путём:
+`hermes -z '...echo HOME=$HOME...' --yolo -t terminal` (тот же способ,
+что уже использовался для D-001) вернул `HOME=/root`,
+`site.getusersitepackages()` → `/root/.local/...` — и `rapidocr_onnxruntime`
+из D-017 сразу нашёлся без переустановки.
+
+**Известное последствие, ожидаемое по D-017:** пересоздание контейнеров
+стирает apt-слой — `chromium` (D-017) пропал из обоих контейнеров.
+Переустановлен сразу же (тот же путь: `docker exec -u root` по ключу
+`id_ed25519_hermes_vps`, никогда не выдаётся агенту) вместе с шрифтами.
+`pip`-пакеты в `/root/.local` (rapidocr и всё новое из части 3) — не
+пострадали, они лежат на host-стороне bind-mount, не в writable-слое
+контейнера.
+
+### Часть 3 — доустановка под `powerpoint`/`xlsx`
+
+Прочитаны сами bundled-скиллы `productivity/powerpoint` и
+`productivity/xlsx` — их же секция Prerequisites. Оба **требуют
+LibreOffice** не опционально: `xlsx` — для пересчёта формул
+(`scripts/recalc.py`), `powerpoint` — для рендера слайдов в картинки на
+визуальной QA. Текст самих скиллов прямо пишет `sudo apt install
+libreoffice`/`poppler-utils` — прямой конфликт с клеткой: у `hermes` нет
+`sudo` вообле (D-003/D-004), тот же класс проблемы, что Chromium в
+D-017. Решено тем же путём — установлено от root по SSH-ключу
+`id_ed25519_hermes_vps` (не агентом): `libreoffice`, `poppler-utils`,
+`libgl1` (последний — отдельная находка: `rapidocr` тянет `cv2` из
+полного `opencv-python`, которому нужен `libGL.so.1`, которого нет в
+безголовом образе; исправлено переустановкой на `opencv-python-headless`
+— без единого нового apt-пакета).
+
+Через обычный uid агента (`pip`, теперь корректно попадает в durable
+`/root/.local` благодаря части 2) доставлено: `openpyxl`, `pandas`,
+`markitdown[pptx,xlsx]`, `python-docx`, `defusedxml`, `lxml`
+(`python-pptx` подтянулся транзитивно через `markitdown[pptx]`).
+`pptxgenjs` (npm) — намеренно не трогали как durable-путь, скилл и так
+ставит его per-project (`npm install` в рабочей директории), это
+штатное поведение для node-зависимостей, не баг.
+
+**Проверено сквозным тестом, не просто «пакет виден им­портом», в обоих
+контейнерах:** `xlsx` — записана книга с формулой `=SUM(...)`, прогнан
+штатный `scripts/recalc.py` самого скилла → `{"status": "success",
+"total_errors": 0}`; `powerpoint` — собран `.pptx` через `pptxgenjs`,
+конвертирован в PDF штатным `scripts/office/soffice.py` самого скилла,
+затем в JPEG через `pdftoppm` — вся цепочка визуальной QA скилла
+отработала без правок. Диск после всех установок — 60 ГБ свободно из 89
+(было 63 до, `libreoffice` весит некритично).
+
+**Почему это не гипотеза.** Первопричина HOME — прочитанный код
+(`hermes_constants.py`, `tools/environments/docker.py`), не
+предположение; исправление проверено живым вызовом через сам Hermes
+(`hermes -z`), не только моим ручным `docker exec`; готовность
+`xlsx`/`powerpoint` проверена штатными скриптами самих скиллов до
+результата (пересчитанное значение / отрендеренная картинка), не
+просто «импорт не упал».
+
