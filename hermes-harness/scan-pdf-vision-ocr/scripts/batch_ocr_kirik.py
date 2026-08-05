@@ -58,8 +58,14 @@ def ocr_subprocess(path, json_path):
         with open(json_path) as f:
             return json.load(f)
     r = subprocess.run(
-        ['python3', OCR_SCRIPT, path, json_path],
-        env=env, capture_output=True, text=True, timeout=180
+        # --lang cyrillic: Kirik is a Russian textbook — the default rec
+        # model has no Cyrillic in its vocabulary at all (D-022), not just
+        # "worse" on it. Timeout dropped 180s→60s: the thread fix (D-023)
+        # cuts a full-page call to ~20s at this crop size; 60s is still a
+        # generous margin, and a lower timeout fails fast instead of
+        # sitting on a hung call.
+        ['python3', OCR_SCRIPT, path, json_path, '--lang', 'cyrillic'],
+        env=env, capture_output=True, text=True, timeout=60
     )
     if r.returncode != 0:
         print(f'FAIL {path}: rc={r.returncode}', flush=True)

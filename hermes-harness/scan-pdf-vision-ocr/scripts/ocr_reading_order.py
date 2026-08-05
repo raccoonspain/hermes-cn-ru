@@ -15,11 +15,25 @@ This recovers reading order much better than sorting all blocks together,
 because rapidocr does not know about columns.
 """
 
+import os
 from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
 
+# Thread-fixed bundled config (D-023, 2026-08-05) — package default
+# `intra_op_num_threads: -1` spawns one thread per host-visible core (8)
+# on a container capped at 1.0 vCPU, ~4x slower than forcing 1 thread for
+# identical output. `lang='cyrillic'` for Russian scans (D-022 — default
+# rec model has no Cyrillic in its vocabulary, not just "worse" on it).
+_SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def ocr_with_reading_order(page_path, left_col=True, right_col=True, y_bucket=20):
+
+def _config_path(lang='latin'):
+    path = os.path.join(_SKILL_DIR, 'models', f'rapidocr-{lang}', 'config.yaml')
+    return path if os.path.exists(path) else None
+
+
+def ocr_with_reading_order(page_path, left_col=True, right_col=True, y_bucket=20,
+                            lang='latin'):
     """OCR a page (or both columns of a spread), grouped into rows.
 
     Returns: list of rows, each row is a list of strings (left→right).
@@ -32,7 +46,8 @@ def ocr_with_reading_order(page_path, left_col=True, right_col=True, y_bucket=20
     if right_col:
         crops.append(('R', img.crop((W // 2, 0, W, H))))
 
-    engine = RapidOCR()
+    config_path = _config_path(lang)
+    engine = RapidOCR(config_path=config_path) if config_path else RapidOCR()
     all_rows = []
     for label, crop in crops:
         path = f'/tmp/__ocr_{label}.png'
@@ -65,7 +80,9 @@ def rows_to_text(rows, join=' '):
 
 if __name__ == '__main__':
     import sys
-    rows = ocr_with_reading_order(sys.argv[1])
+    lang = 'cyrillic' if '--cyrillic' in sys.argv else 'latin'
+    path = [a for a in sys.argv[1:] if not a.startswith('--')][0]
+    rows = ocr_with_reading_order(path, lang=lang)
     text = rows_to_text(rows)
     for label in ('L', 'R'):
         if text[label]:

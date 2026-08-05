@@ -1,0 +1,80 @@
+Global:
+    text_score: 0.5
+    use_det: true
+    use_cls: true
+    use_rec: true
+    print_verbose: false
+    min_height: 30
+    width_height_ratio: 8
+    max_side_len: 2000
+    min_side_len: 30
+    return_word_box: false
+
+    # Forced to 1, NOT -1/"auto" (verified 2026-08-05, D-023): this sandbox
+    # container is capped at 1.0 vCPU (`docker inspect`: NanoCpus=1e9),
+    # but `-1` makes onnxruntime spawn one thread per HOST-visible core
+    # (`nproc` reports 8) — 8 threads fighting over a 1-core cgroup quota.
+    # Forcing 1 thread cut a full-page OCR call from 71s to 17.5s on the
+    # exact same image, byte-identical output (verified, not assumed).
+    # Do NOT try to compensate by running multiple OCR calls concurrently
+    # instead — same 1-vCPU cap applies process-wide, so concurrent calls
+    # just divide that one core more ways (tested: 4 concurrent calls,
+    # ~114s each, ~117s total wall time — worse than 4×17.5s=70s sequential).
+    intra_op_num_threads: &intra_nums 1
+    inter_op_num_threads: &inter_nums 1
+
+Det:
+    intra_op_num_threads: *intra_nums
+    inter_op_num_threads: *inter_nums
+
+    use_cuda: false
+    use_dml: false
+
+    model_path: models/ch_PP-OCRv4_det_infer.onnx
+
+    limit_side_len: 736
+    limit_type: min
+    std: [ 0.5, 0.5, 0.5 ]
+    mean: [ 0.5, 0.5, 0.5 ]
+
+    thresh: 0.3
+    box_thresh: 0.5
+    max_candidates: 1000
+    unclip_ratio: 1.6
+    use_dilation: true
+    score_mode: fast
+
+Cls:
+    intra_op_num_threads: *intra_nums
+    inter_op_num_threads: *inter_nums
+
+    use_cuda: false
+    use_dml: false
+
+    model_path: models/ch_ppocr_mobile_v2.0_cls_infer.onnx
+
+    cls_image_shape: [3, 48, 192]
+    cls_batch_num: 6
+    cls_thresh: 0.9
+    label_list: ['0', '180']
+
+Rec:
+    intra_op_num_threads: *intra_nums
+    inter_op_num_threads: *inter_nums
+
+    use_cuda: false
+    use_dml: false
+
+    # Cyrillic-capable recognition model (cyrillic_PP-OCRv5_mobile_rec, source:
+    # https://github.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models) —
+    # the stock rapidocr-onnxruntime ships only ch_PP-OCRv4_rec_infer.onnx
+    # (Chinese+English), which reads Cyrillic as visually-similar Latin
+    # homoglyphs (С→C, Н→H, О→O...) instead of actual Cyrillic. See D-022.
+    model_path: /root/.hermes/skills/productivity/scan-pdf-vision-ocr/models/rapidocr-cyrillic/cyrillic_PP-OCRv5_mobile_rec_infer.onnx
+    # dict had a spurious leading blank line in the upstream repo (851 lines,
+    # should be 850 — off-by-one desyncs every character index against the
+    # model's 852-class output). Fixed copy, do not re-download over it.
+    rec_keys_path: /root/.hermes/skills/productivity/scan-pdf-vision-ocr/models/rapidocr-cyrillic/ppocrv5_cyrillic_dict.txt
+
+    rec_img_shape: [3, 48, 320]
+    rec_batch_num: 6

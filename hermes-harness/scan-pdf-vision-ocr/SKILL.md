@@ -3,7 +3,7 @@ name: scan-pdf-vision-ocr
 description: "Use when a PDF is image-only (no text layer) and you need to read it, extract tasks/questions/figures, or assemble an md file. Renders pages with PyMuPDF, OCRs text with rapidocr-onnxruntime, uses vision_analyze for figures/graphs and pages rapidocr can't read, crops figures via PIL."
 tags: ["PDF", "OCR", "vision", "scans", "textbook", "images", "markdown"]
 related_skills: ["ocr-and-documents", "pdf", "vision_analyze"]
-version: 1.8.0
+version: 1.9.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -15,13 +15,16 @@ metadata:
       - references/render-and-crop.md    # PyMuPDF render + PIL crop recipes
       - references/embedded-jpeg-rotation.md  # 90°-rotated JPEG inside scanned PDF (added 2026-08-05)
       - references/cyrillic-homoglyph-recovery.md  # FALLBACK ONLY as of 2026-08-05 — superseded by models/rapidocr-cyrillic/, see D-022
-      - models/rapidocr-cyrillic/config.yaml  # bundled cyrillic_PP-OCRv5_mobile_rec model, use as RapidOCR(config_path=...) on Cyrillic docs (added 2026-08-05, D-022)
+      - models/rapidocr-cyrillic/config.yaml  # bundled cyrillic_PP-OCRv5_mobile_rec model + thread fix, use via scripts/ocr_page.py --lang cyrillic (D-022, D-023)
+      - models/rapidocr-latin/config.yaml  # stock Det/Rec/Cls + thread fix (4x speedup, D-023) — default for non-Cyrillic docs, use via scripts/ocr_page.py --lang latin
       - references/kirik-session.md      # kirik-kinematika concrete lessons
       - references/galanz-aerogril-session.md  # 3-page scan → RU .docx, two-column OCR fix, vision 400
       - references/graph-curve-extraction.md  # pure-PIL graph data recovery when vision is down
       - references/bilingual-parallel-text-book.md  # OCR → translate → bilingual .docx recipe (Magic Bird 2026-08-05)
       - templates/tasks-md.md            # md skeleton for textbook problem sets
+      - templates/cyrillic_config.yaml  # superseded 2026-08-05 (D-023) — was a workaround for a CWD bug that turned out not to exist; use models/rapidocr-cyrillic/config.yaml directly
       - scripts/render_pdf_to_pngs.py    # reusable render-at-two-DPI script
+      - scripts/ocr_page.py              # PRIMARY entry point (D-023) — one page/image, --lang cyrillic|latin, terse stdout + full text to file
       - scripts/ocr_reading_order.py    # rapidocr with row-bucketed reading order
       - scripts/batch_ocr_kirik.py       # resumable paged OCR for Kirik-style scans
       - scripts/ocr_one_subprocess.py    # subprocess wrapper for one RapidOCR call
@@ -33,10 +36,15 @@ metadata:
 > "don't run parallel OCR processes" rule in the Pitfalls section is the
 > single most important behavior to internalize — it's been flagged by
 > the user twice (Kirik 9–18 session, 2026-08-03) because it manifests
-> as "six OCR processes competing for 8 CPU cores, sandbox OOMs, every
-> subsequent vision/OCR call times out". If you start a fresh inline
-> OCR loop without reading that pitfall, you'll burn the session
-> fighting `pthread_create failed` errors. Use
+> as "several OCR processes competing for CPU, sandbox OOMs, every
+> subsequent vision/OCR call times out". **This container is capped at
+> 1.0 vCPU** (`docker inspect`: `NanoCpus=1e9`) even though `nproc`
+> reports 8 — that 8 is host-visible, not container-available (D-023,
+> 2026-08-05). Concurrency doesn't help here; it just divides the one
+> real core more ways and makes every call slower. If you start a fresh
+> inline OCR loop without reading that pitfall, you'll burn the session
+> fighting `pthread_create failed` errors. Use `scripts/ocr_page.py` for
+> a single page/image (the default entry point, D-023) or
 > `scripts/batch_ocr_kirik.py` (resumable, json-checkpoint,
 > subprocess-per-column) instead of an inline orchestrator.
 
@@ -183,27 +191,63 @@ when the Cyrillic model isn't available. A pre-downloaded Cyrillic model
 `models/rapidocr-cyrillic/` — point `RapidOCR` at its `config_path` and
 it reads Cyrillic directly, no homoglyph decoding needed:
 
-```python
-from rapidocr_onnxruntime import RapidOCR
+**Use `scripts/ocr_page.py`, not an inline `RapidOCR()` call (D-023,
+2026-08-05).** It picks the right model (`--lang cyrillic|latin`), uses
+the thread-fixed config (see speed note below), writes full text to a
+file, and prints one terse summary line instead of dumping the whole
+transcription into your own output:
 
-# Cyrillic docs — bundled model, reads Russian directly:
-engine = RapidOCR(config_path=(
-    "/root/.hermes/skills/productivity/scan-pdf-vision-ocr/"
-    "models/rapidocr-cyrillic/config.yaml"
-))
-# Non-Cyrillic docs (Latin/Chinese) — stock default is fine:
-# engine = RapidOCR()
-
-result, _ = engine(f'{out}/p{i+1:02d}.png')
-text = "\n".join(line[1] for line in result)
+```
+python3 /root/.hermes/skills/productivity/scan-pdf-vision-ocr/scripts/ocr_page.py \
+    {out}/p{i+1:02d}.png  {out}/p{i+1:02d}.txt  --lang cyrillic
+# stdout: "p01.png [cyrillic]: 39 lines, avg_conf=0.96, 2 below 0.75, 17.8s -> p01.txt"
 ```
 
+Then `read_file`/`grep` the `.txt` only for what you need — don't paste
+whole-page OCR dumps into your own reasoning/response. See "Token cost —
+don't let raw OCR text bloat the session" below for why this matters
+more than it looks.
+
+**Speed: force `intra_op_num_threads`/`inter_op_num_threads` to `1`, not
+the package default `-1` (verified 2026-08-05, D-023) — this alone is a
+4x speedup with byte-identical output.** This sandbox container is capped
+at **1.0 vCPU** (`docker inspect`: `NanoCpus=1e9`), but `-1` ("auto")
+makes onnxruntime spawn one thread per *host-visible* core (`nproc`
+reports 8) — 8 threads fighting over a 1-core cgroup quota. A full-page
+OCR call (2409×3437) went from **71s → 17.5s** on the exact same image
+after forcing 1 thread, verified byte-for-byte identical output. Both
+bundled configs (`models/rapidocr-cyrillic/config.yaml` and
+`models/rapidocr-latin/config.yaml`) already have this fix — `ocr_page.py`
+uses them automatically, so you only need to think about this if you're
+calling `RapidOCR()` some other way.
+
+**Do NOT try to go faster by running several OCR calls concurrently
+instead of sequentially — tested, it's slower, not faster (D-023).** The
+1-vCPU cap is container-wide, not per-process: 4 single-threaded OCR
+calls launched at once measured ~114s *each* (~117s total wall time) vs.
+4 sequential calls at 17.5s = 70s total. Concurrency just divides the one
+real core more ways; it doesn't add cores. One page at a time, in order.
+
+**⚠ There is no CWD-dependence to worry about here — don't rediscover
+this the hard way.** `RapidOCR`'s `update_model_path()` always resolves
+relative `Det`/`Cls` model paths against the **package's own directory**
+(a module-level `root_dir` constant), never against your script's
+current working directory or where `config.yaml` lives. A prior version
+of this doc claimed the bundled Cyrillic config "breaks with non-default
+CWD" and pointed at `templates/cyrillic_config.yaml` as a workaround —
+**that claim was wrong**, verified live 2026-08-05: `RapidOCR(config_path="…/models/rapidocr-cyrillic/config.yaml")`
+loads and runs correctly from `/workspace` (a real project CWD, not the
+package dir), zero errors, full output. `templates/cyrillic_config.yaml`
+still works (it's just a config with absolute paths) but is unnecessary —
+use the bundled config directly, one less file to keep in sync. If you
+ever see a *different*, real path problem, it is not this one — check
+`os.path.exists(config_path)` and the actual error, don't assume CWD.
+
 If you don't yet know the document's script when you first call this,
-render page 1, run stock `RapidOCR()` on it, and eyeball one line — if it
-comes back as Latin-lookalike gibberish on what is visibly a Cyrillic
-scan, that's the signal to switch to the bundled Cyrillic config for the
-rest of the pages. Don't burn a `vision_analyze` call just to detect the
-script.
+render page 1, run `ocr_page.py --lang latin` on it, and eyeball one
+line — if it comes back as Latin-lookalike gibberish on what is visibly
+a Cyrillic scan, switch to `--lang cyrillic` for the rest of the pages.
+Don't burn a `vision_analyze` call just to detect the script.
 
 If `text` looks complete and coherent for the page (task numbers present,
 no obvious garbling) — use it directly, skip `vision_analyze` for that
@@ -418,6 +462,12 @@ Embed the cropped PNGs with relative `./` paths so the md is portable.
   5. **Always save the original scan as an attachment.** Path: `result/attachments/<name>_p1.jpeg` (or whatever extension). The user MUST be able to pull it up and check any ⚠-marked spot against the source — for legal documents this isn't optional.
   6. **Don't loop on `vision_analyze` retry.** When vision returns 400 on a Russian document, the fastocr-via-rapidocr path is your friend. Vision's value here is in *layout questions* ("which task numbers are on this page"), not in *transcription* of a document rapidocr can already read (in homoglyph form).
   7. **In the final md**, mark every uncertain reconstruction with `⚠` in a dedicated table — name/abbreviation/date that OCR couldn't pin down. Tell the user explicitly: "это юридический документ, любая ошибка OCR критична, сверяйте по скану". Better one round of clarification than a confidently-wrong explanation that goes into a real labor dispute file.
+- **CORRECTED 2026-08-05 (D-023) — there is no CWD bug.** A prior version of this entry claimed the bundled Cyrillic config "breaks with non-default CWD" because `Det`/`Cls` model paths are relative. **That was a misdiagnosis, not a real bug** — live-verified: `RapidOCR(config_path=".../models/rapidocr-cyrillic/config.yaml")` loads and OCRs correctly from `/workspace` (an ordinary project CWD), zero errors. `update_model_path()` in `rapidocr_onnxruntime` always resolves relative `Det`/`Cls` paths against the package's own directory (a module constant), never against CWD. Whatever actually went wrong in the session that produced the original entry, it wasn't this — don't spend time re-copying configs or `cd`-ing into the package directory to "fix" it. If `RapidOCR(...)` genuinely returns 0 lines, check `os.path.exists(config_path)` and read the real exception first.
+- **`terminal(command=..., timeout=N)` does NOT kill subprocess children when it times out (verified 2026-08-05, reocr_5page batch).** Symptom: `terminal(...)` returns `exit_code=124` after the timeout, but `ps aux` shows both the parent script and the inner `python3 ocr_one_subprocess.py` are still running, consuming CPU and RAM invisibly across subsequent turns. If a later OCR call hits the `pthread_create failed` pitfall *after* a timeout was reported as clean, suspect leaked subprocess children. **Fix:** after any timeout, run `ps aux | grep -iE "python3.*ocr|python3.*reocr"` and `kill -9 <pids>` any leftovers before starting the next OCR work — or better, use `scripts/ocr_page.py` per-page (D-023: ~18-25s per call after the thread fix, well under any reasonable timeout) instead of a long-running multi-page orchestrator that can itself get killed mid-flight.
+- **Use `vision_analyze` as a tiebreaker for ONE specific OCR uncertainty, not as a re-OCR of the whole document (verified 2026-08-05 on a Cyrillic ДИ signature).** Pattern: when rapidocr returns a low-confidence or partially-Latin reading of a specific token (e.g. a surname at the end of a document — `A.C.Вenин` with mixed Cyrillic/Latin), don't re-OCR the whole page — crop a tight bounding box around just that token (e.g. `Image.crop((1700, 2480, 2300, 2620))`), upscale 2–3× with LANCZOS, save to PNG, and call `vision_analyze` on the crop with a narrow prompt like *"Прочти одну русскую фамилию из 5 букв справа от инициалов «А.С.». Перечисли все возможные варианты, какие видишь."* Vision returned `Венин` with high confidence on a name that rapidocr had read as the homoglyph-looking `A.C.Вenин` — and crucially vision also said *"characters are clear, well-defined, and printed (not handwritten or cursive)"*, which ruled out the OCR-confusion-with-`Б` hypothesis and told me the document really does print the surname in mixed Cyrillic/Latin (a real-world quirk of the original). This is cheaper (one small image) than full-page re-OCR and *also* answers meta-questions rapidocr can't ("is this handwritten?", "are these marks actually part of the text or noise?"). Budget: 1 vision call per truly-ambiguous token. Don't burn 5 calls on the same crop trying different prompts — the first one usually answers.
+- **Token cost — don't let raw OCR text bloat the session (D-023, 2026-08-05).** A single document-digitization task grew one chat session to 195 messages / 332 KB of exported history (up from ~79 KB after page 1 alone) — largely from OCR dumps, homoglyph tables, and line-by-line v1-vs-v2 comparisons pasted directly into the agent's own reasoning/responses. Every subsequent turn in that session re-processes the *entire* accumulated history as input context — this, not the OCR compute itself, is the most likely dominant cost driver on a multi-page job. **Rule: raw OCR output goes to a file (`scripts/ocr_page.py` already does this), never pasted in full into your own response.** When you need to check something specific, `grep`/`sed` the file for that line, don't `cat` the whole thing into your reasoning. When comparing two OCR passes, diff the *files* and quote only the differing lines, not both full transcripts.
+- **`terminal(command=..., timeout=N)` does NOT kill subprocess children when it times out (verified 2026-08-05, reocr_5page batch).** Symptom: `terminal(...)` returns `exit_code=124` after the timeout, but `ps aux` shows both the parent script and the inner `python3 ocr_one_subprocess.py` are still running, consuming CPU and RAM invisibly across subsequent turns. If a later OCR call hits the `pthread_create failed` pitfall *after* a timeout was reported as clean, suspect leaked subprocess children. **Fix:** after any timeout, run `ps aux | grep -iE "python3.*ocr|python3.*reocr"` and `kill -9 <pids>` any leftovers before starting the next OCR work. Better: design your script so each subprocess is a separate `subprocess.run([...], timeout=...)` call that *Python* kills itself if it overruns — `subprocess.run` with `timeout=` raises `TimeoutExpired` and the subprocess is reaped. If you must use a top-level Python orchestrator (e.g. a long batch loop), wrap each page's OCR in its own `subprocess.run([...], timeout=120)` so a slow page doesn't block the whole batch, and kill the parent on exception.
+- **Use `vision_analyze` as a tiebreaker for ONE specific OCR uncertainty, not as a re-OCR of the whole document (verified 2026-08-05 on a Cyrillic ДИ signature).** Pattern: when rapidocr returns a low-confidence or partially-Latin reading of a specific token (e.g. a surname at the end of a document — `A.C.Вenин` with mixed Cyrillic/Latin), don't re-OCR the whole page — crop a tight bounding box around just that token (e.g. `Image.crop((1700, 2480, 2300, 2620))`), upscale 2–3× with LANCZOS, save to PNG, and call `vision_analyze` on the crop with a narrow prompt like *"Прочти одну русскую фамилию из 5 букв справа от инициалов «А.С.». Перечисли все возможные варианты, какие видишь."* Vision returned `Венин` with high confidence on a name that rapidocr had read as the homoglyph-looking `A.C.Вenин` — and crucially vision also said *"characters are clear, well-defined, and printed (not handwritten or cursive)"*, which ruled out the OCR-confusion-with-`Б` hypothesis and told me the document really does print the surname in mixed Cyrillic/Latin (a real-world quirk of the original). This is cheaper (one small image) than full-page re-OCR and *also* answers meta-questions rapidocr can't ("is this handwritten?", "are these marks actually part of the text or noise?"). Budget: 1 vision call per truly-ambiguous token. Don't burn 5 calls on the same crop trying different prompts — the first one usually answers.
 - **Embedded JPEG in scanned PDF may be rotated 90° relative to the page (verified 2026-08-05 on a children's picture book).** `doc.extract_image(xref)` returns the **raw** JPEG bytes — dimensions are the image's native orientation. But the image may be placed on the page via a transformation matrix so `page.get_image_rects(xref)` returns a bbox rotated 90° relative to the page rect. Symptom that the user will report verbatim: *"Особенно, если картинка повернута на 90 градусов"* — and they will also complain that *"Вставлять целиком страницу скана с английским языком — это бред"* if you don't catch and rotate.
 
   Detection:

@@ -1,7 +1,7 @@
 ---
 name: ocr-and-documents
 description: "Extract text from PDFs/scans (pymupdf, marker-pdf)."
-version: 2.6.0
+version: 2.7.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -58,11 +58,13 @@ worksheets, or screenshots where you only need the text** (no tables/equations/l
 (no PyTorch, no multi-GB download, no LLM round-trip), already installed in
 this sandbox as of 2026-08-03 (part of the `local-browser-rendering` skill's toolchain — if
 `import rapidocr_onnxruntime` fails, self-heal with `pip install rapidocr-onnxruntime`, no root
-needed). **On Cyrillic (Russian) text, the default model does not work** — it has no Cyrillic in
-its vocabulary and silently emits Latin lookalikes instead (`С`→`C`, `Н`→`H`...) rather than failing
-loudly. Use `scan-pdf-vision-ocr`'s bundled `models/rapidocr-cyrillic/config.yaml` via
-`RapidOCR(config_path=...)` for any Cyrillic document — see that skill's Step 2.5 (root cause and fix:
-D-022, 2026-08-05). Reach for `marker-pdf` only when you actually need tables, equations, or reading-order-aware
+needed). **Call it via `scan-pdf-vision-ocr`'s `scripts/ocr_page.py <img> <out.txt> --lang cyrillic|latin`**,
+not a bare inline `RapidOCR()` — two things depend on it: (1) **Cyrillic (Russian) text needs the
+`cyrillic` model** — the stock model has no Cyrillic in its vocabulary and silently emits Latin
+lookalikes instead (`С`→`C`, `Н`→`H`...) rather than failing loudly (root cause and fix: D-022,
+2026-08-05); (2) **both bundled configs force single-threaded inference**, which is a 4x speedup
+on this sandbox (71s→17.5s per full page) because the container is capped at 1 vCPU regardless of
+what `nproc` reports — see that skill's Step 2.5 (D-023, 2026-08-05). Reach for `marker-pdf` only when you actually need tables, equations, or reading-order-aware
 markdown from a scan — those are real gaps in rapidocr, not marker-pdf being generally "better OCR".
 Reach for `vision_analyze` on a scanned page only when rapidocr's output looks wrong/garbled on
 inspection, or the task needs genuine visual understanding (a diagram, a graph, handwriting rapidocr
