@@ -3,7 +3,7 @@ name: scan-pdf-vision-ocr
 description: "Use when a PDF is image-only (no text layer) and you need to read it, extract tasks/questions/figures, or assemble an md file. Renders pages with PyMuPDF, OCRs text with rapidocr-onnxruntime, uses vision_analyze for figures/graphs and pages rapidocr can't read, crops figures via PIL."
 tags: ["PDF", "OCR", "vision", "scans", "textbook", "images", "markdown"]
 related_skills: ["ocr-and-documents", "pdf", "vision_analyze"]
-version: 1.9.0
+version: 1.10.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -47,6 +47,21 @@ metadata:
 > a single page/image (the default entry point, D-023) or
 > `scripts/batch_ocr_kirik.py` (resumable, json-checkpoint,
 > subprocess-per-column) instead of an inline orchestrator.
+
+> **Vision model changed 2026-08-06 (live test, supersedes the "low" pick
+> in D-018 for this use case).** `auxiliary.vision.model` in
+> `config.yaml` is now `kimi/kimi-k2.7-code` (was `wormsoft/vision/low`).
+> This is a **global** setting — `vision_analyze` has no per-call model
+> override (confirmed against source in D-018), so every vision call from
+> every skill/session uses this model until it's changed back. Reason:
+> the user's actual requirement for scan digitization is full fidelity —
+> "text as text, every character, and images/graphs/schemes must also be
+> understood" — not speed. D-018's `wormsoft/vision/low` pick was
+> validated on one simple test image (text + one diagram); it was never
+> tested against a real multi-page Cyrillic legal/HR scan under load. If
+> this session's result is worse than the `rapidocr` + manual zoom-crop
+> baseline from 2026-08-05, say so plainly and don't quietly fall back —
+> report it so the config can be reverted or re-tuned.
 
 Read image-only (scanned) PDFs by rendering pages to PNG with PyMuPDF and
 letting `vision_analyze` do the OCR. The pattern is meant for **assembling
@@ -270,6 +285,37 @@ to vision for everything. If `models/rapidocr-cyrillic/` is missing
 (fresh sandbox, not yet re-synced), fall back to the homoglyph-recovery
 Pitfall below rather than blocking — but flag it to the user, this bundled
 model should exist and its absence means something didn't sync.
+
+## Step 2.6 — When full fidelity matters more than speed, flip the priority (added 2026-08-06)
+
+Step 2.5's "rapidocr first, vision only for figures/failures" order is
+tuned for **fast plain-text transcription**. It is the wrong default when
+the user has said, in effect, "no rush, but the text must be exact to the
+character and I need the figures/graphs/schemes actually understood, not
+just cropped." Two structural reasons `rapidocr` alone can't satisfy that
+bar, independent of which recognition model is loaded:
+
+- It only ever emits characters from its own recognition vocabulary — it
+  cannot describe a diagram, chart, table structure, or handwriting
+  context. `vision_analyze` is not optional for those regardless of how
+  good the text OCR is.
+- A one-shot full-page `rapidocr` pass and a one-shot full-page
+  `vision_analyze` pass fail in *different* places (rapidocr drops small
+  print/multi-column layout runs; vision can lose short numbered items
+  buried in dense text). Neither alone reaches character-exact on a dense
+  legal/HR document — see the 2026-08-05/06 ДИ session in
+  `references/kirik-session.md`-adjacent history, where manual zoom-crop
+  verification against `rapidocr` output caught real gaps only a second
+  independent read (vision) resolved.
+
+When the user has explicitly opted into this bar: run **both** on every
+page — `ocr_page.py` for a fast, cheap, confidence-scored pass, and
+`vision_analyze` on the same full page for a second independent read plus
+figure/diagram description — and reconcile differences, rather than
+treating `vision_analyze` as a fallback gated behind `rapidocr` looking
+wrong. This costs more than Step 2.5's default path; that's the deal the
+user asked for. Don't default into it for ordinary "just get me the text"
+requests — ask if unclear, don't assume.
 
 ## Step 3 — Locate content with `vision_analyze`
 
