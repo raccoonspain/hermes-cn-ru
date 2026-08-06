@@ -3,7 +3,7 @@ name: scan-pdf-vision-ocr
 description: "Use when a PDF is image-only (no text layer) and you need to read it, extract tasks/questions/figures, or assemble an md file. Renders pages with PyMuPDF, OCRs text with rapidocr-onnxruntime, uses vision_analyze for figures/graphs and pages rapidocr can't read, crops figures via PIL."
 tags: ["PDF", "OCR", "vision", "scans", "textbook", "images", "markdown"]
 related_skills: ["ocr-and-documents", "pdf", "vision_analyze"]
-version: 1.13.0
+version: 1.13.1
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -120,12 +120,18 @@ print(len(doc))                  # page count
 
 If image-only: proceed. If text exists, switch to `ocr-and-documents`.
 
-**Children's picture book fingerprint (verified 2026-08-05).** A common
-scanned-book shape is: each PDF page contains **exactly one** embedded
-image (`page.get_images(full=True)` returns a 1-element list) and the
-image's pixel dimensions (e.g. 2409×3437) are larger than the page rect
-in points. The page IS that image — a full-page scan, the rest of the
-page is whitespace. Detect it early so you can route correctly:
+**One-image-per-page fingerprint (verified 2026-08-05 children's books,
+2026-08-06 legal/HR scans).** A common scanned-document shape is: each
+PDF page contains **exactly one** embedded image
+(`page.get_images(full=True)` returns a 1-element list) and the image's
+pixel dimensions (e.g. 2409×3437) are larger than the page rect in
+points. The page IS that image — a full-page scan, the rest of the
+page is whitespace. This is not just children's picture books: it
+also covers single-page-per-image scans of legal documents, HR
+инструкции, contracts, signed statements, and similar short
+single-page-per-image scans (the 2026-08-06 ДИ ведущего экономиста
+session — 4 pages, 2409×3437 each — matched this fingerprint exactly).
+Detect it early so you can route correctly:
 
 ```python
 for p in doc:
@@ -143,6 +149,14 @@ Why bother: extracted images preserve printer-quality resolution and
 look better when you later embed them in a new `.docx` (no
 re-rendering, no anti-aliasing artefacts). Render only if the embedded
 image is unreadable (heavily compressed JPEG, broken ICC profile).
+**Bonus of extracting before OCR instead of rendering**: it surfaces
+scan-side duplication. If two pages contain the same content
+(verified 2026-08-06 — pages 2 and 3 of a 4-page ДИ scan were
+identical text with different MD5 bytes, i.e. a xerox/double-feed
+artifact), comparing extracted bytes' MD5 lets you catch it before
+spending OCR compute on the duplicate. With rendered PNGs the same
+content looks like the same content; with extracted JPEGs the
+metadata makes the duplication visible.
 
 **Endpoint note.** If the user wants a Word/bilingual deliverable after
 OCR (not a markdown), see `references/bilingual-parallel-text-book.md`
@@ -403,21 +417,27 @@ detail (full text of a task, description of a graph).
   separately and **stitch the fragments** — vision will not stitch them
   for you.
 
-**Provider degraded (timeout / 429 / 500) — back off and say so, don't guess.**
+**Provider degraded (timeout / 429 / 500 / 502) — back off and say so, don't guess.**
 "Retry once" is not enough — the provider can be down for minutes, and on a
 credit-exhausted 429 it stays down until the subscription's window resets
 (4h on our plan, see `docs/wormsoft-api.md` in the main repo). Two failure
-modes look the same (a stuck call) but need different handling — don't
+Two failure modes look the same (a stuck call) but need different handling — don't
 conflate them:
 
 1. **Tell the user in one line** what's happening ("vision не отвечает
-   (таймаут/429/500), подожду N и попробую снова") — this is a normal
+   (таймаут/429/500/502), подожду N и попробую снова") — this is a normal
    assistant-text message, not a special action.
 2. **Sleep, then retry the same call**, escalating on each consecutive
    failure of *that* call:
    `30s → 1m → 5m → 15m → 30m → 1h → 2h` (≈3h51m total — just under one
    4-hour credit window). Use `terminal_tool(command="sleep N",
    timeout=N+30)` — every step fits a single foreground call (cap is 600s).
+   **502 Bad Gateway is the easiest to recover from** — nginx/upstream
+   hiccup, almost always clears on a 30 s retry (verified 2026-08-06 on
+   page 2 of a 4-page ДИ scan — first call returned `nginx/1.31.1
+   502 Bad Gateway`; waited 30 s, retried, succeeded cleanly). Don't
+   skip past the 30 s step on a 502; the ladder is right but 502
+   usually doesn't need the longer waits.
 3. **Succeeds at any step → continue normally**, don't keep escalating out
    of habit.
 4. **Ladder exhausted → this is not a "give up and idle" situation.** If
@@ -740,7 +760,12 @@ Embed the cropped PNGs with relative `./` paths so the md is portable.
   `OMP_NUM_THREADS=1` / `MKL_NUM_THREADS=1` exported. If it still fails,
   wait 30–60 s — the leaked threads are GC'd and a fresh engine works.
   This is a recurring container-level limitation, not a script bug.
-- **Vision can return identical output for two genuinely different images — verify against rendered PNG, not just OCR text (verified 2026-08-06 on a 4-page Russian ДИ scan).** When `outer/pages/p02.png` and `outer/pages/p03.png` had different MD5 hashes (`d4019a...` vs `ae3ed9...`) but `vision_analyze` returned byte-identical 50-line transcriptions for both ("2.2.18: основы... 3.1.23: защищать..."), the model was confidently describing page 2 twice instead of page 3 — a real failure mode, not OCR error and not a prompt-tuning issue. **Don't conclude "vision and OCR agree, output is correct" when two vision calls returned the same string for distinct inputs.** Two distinct failure shapes to disambiguate before fixing: (a) **vision-side** — model genuinely returns the same content for different inputs, usually a recall/distinguishability bug; (b) **source-side** — the PDF actually contains the same page twice (scan-side error: double-sided mode on single-sided original, kseroks duplicate, scanner double-feed). Verify by computing MD5 of rendered PNGs (`hashlib.md5(open(f,'rb').read()).hexdigest()`) — if hashes differ, the pages are different bytes but the content may still be the same; if the layout structurally matches (column starts, number of text rows, total page-rect area), assume source duplication. Fix for the deliverable: include the duplicated block once in the final md, mark the duplication as a quality issue ("page X and page Y in source PDF are duplicates of the same text block") so the user can re-scan if they want. Don't try to "fix" vision by re-prompting with a sharper question — it was already wrong at the recall level, not the prompt level. A sharper question (`"is this page the same as the previous one?"`) helps confirm the diagnosis but won't recover the missing page.
+- **Vision can return identical output for two genuinely different images — distinguish vision-bag from source-duplicate before fixing (verified 2026-08-06 on a 4-page Russian ДИ scan).** When `outer/pages/p02.jpeg` and `outer/pages/p03.jpeg` had different MD5 hashes (`15f9dfb8…` vs `677b5c7d…`) but `vision_analyze` returned byte-identical transcriptions for both ("2.2.18: основы… 3.1.23: защищать…"), the temptation is to assume vision was buggy. But that assumption *can be wrong*: vision correctly observed that both pages contained the same text — the duplication is in the **source**, not the model. Two distinct failure shapes, two different fixes:
+
+  - **(a) vision-side bug** — model genuinely returns the same content for genuinely different inputs (recall/distinguishability failure). Verified-prevention: compute MD5 of extracted bytes AND visually compare layout; if MD5 differs AND layout differs (column starts, line counts, page-rect dimensions), the content really is different and vision is wrong. Recovery: re-prompting won't help (it was wrong at recall, not prompt); try a different image (crop tighter), or fall back to rapidocr + manual reading.
+  - **(b) source-side duplication** — the PDF actually contains the same page twice (double-sided scan mode on a single-sided original, kseroks duplicate, scanner double-feed, signer photographed the same page twice). Verified fingerprint from 2026-08-06: MD5 differs, file size similar (within 1 %), layout/column structure identical, OCR text string-identical between the two pages. Recovery: include the duplicated block **once** in the final md, add `> ⚠ page X and page Y in source PDF are duplicates of the same text block (MD5 differs, content identical, xerox/double-feed suspected)` so the user can re-scan if they want.
+
+  Don't conclude "vision is broken" before checking whether the content is actually duplicated. `hashlib.md5(open(f,'rb').read()).hexdigest()` plus a diff of OCR transcripts (`diff <(cat p02.txt) <(cat p03.txt)`) takes one second and tells you which category you're in. A sharper follow-up to vision (`"is this page the same content as the previous one?"`) helps confirm the diagnosis but won't recover the missing page in either case.
 - **rapidocr silently drops short numbered list headings on Cyrillic scans when the item text is shorter than the gap-detection threshold (verified 2026-08-06 on a Russian ДИ scan, ~25 of ~80 items dropped).** Pattern observed across pages 1–4 of one document: rapidocr dropped headings whenever the item text was one short line and the next number sat close in Y-coordinate. Symptoms in the OCR output: numbered jumps like "1.4 [continues]... 1.4.5" with no 1.4.1–1.4.4 in between; "3.1.6 [empty] 3.1.7" where 3.1.6's text "контролировать и анализировать накладные расходы" got merged into 3.1.5's tail; "3.1.8" missing entirely because its heading-only text got grouped with 3.1.7's overflow. **Don't conclude "those items are empty in the original."** Detection: scan the OCR output for numbered jumps — build a `set()` of seen numbers and check for gaps in the sequence (e.g. `seen = {re.match(r'(\d+\.\d+\.\d+)', line).group(1) for line in ocr}` then look for expected numbers absent from `seen`). Recovery: don't try to fix item-by-item with zoom-crop+vision (too expensive, ~25 items). Instead, run `vision_analyze` once on the **full page** (DPI 200 render is fine) with the prompt *"Перепиши ДОСЛОВНО всю страницу от первой до последней строки. Сохраняй нумерацию X.X.X точно как в оригинале. Не пропускай ни одного пункта, даже если он короче одной строки."* — vision reads tight-numbered list items more reliably than rapidocr, and a whole-page read lets it count items across the whole list and report every gap. Cost: 1 vision call per page with detected gaps; in the verified case, 3 pages × 1 vision call = 3 calls total recovered all 25 dropped headings, vs. ~25 zoom-crop+vision calls if you tried to verify each gap separately.
 - **`kirik.md` indexing convention for Russian physics textbooks.** When
   the user asks for OCR of a specific page from a multi-page scan ("оцифруй
