@@ -43,6 +43,8 @@
   .new-folder-btn:hover{color:var(--text);border-color:var(--gold)}
   .node .tri{width:10px;text-align:center;flex-shrink:0;font-size:9px;color:var(--text-dim)}
   .node .fcount{font-size:10px;color:var(--text-dim)}
+  .download-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
+  .download-btn:hover{color:var(--text);border-color:var(--gold)}
   .move-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
   .move-btn:hover{color:var(--text);border-color:var(--violet)}
   .delete-btn{background:none;border:1px solid var(--panel-line);color:var(--text-dim);border-radius:5px;font-size:10px;padding:1px 5px;cursor:pointer}
@@ -535,6 +537,7 @@ function renderFolderNode(node, bucketClass, depth) {
   node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
     html += `<div class="node file folder-${bucketClass}" style="padding-left:${depth * 14 + 20}px" data-relpath="${escapeHtml(f.entry.relative_path)}">
       <span class="ic">${iconFor(f.name)}</span><span class="name">${escapeHtml(f.name)}</span>
+      <button class="download-btn" data-download="${escapeHtml(f.entry.relative_path)}" title="скачать">⭳</button>
       <button class="move-btn" data-move="${escapeHtml(f.entry.relative_path)}" title="переместить">→</button>
       <button class="delete-btn" data-delete="${escapeHtml(f.entry.relative_path)}" data-delete-kind="file" title="удалить">🗑</button>
     </div>`;
@@ -545,7 +548,9 @@ function renderFolderNode(node, bucketClass, depth) {
 function renderTree(tree) {
   const labels = { source: '📥 source — от человека', outer: '🔎 outer — нашёл агент', result: '✨ result — сгенерировал агент' };
   let html = (tree.root_files || []).map(f =>
-    `<div class="node file" data-relpath="${escapeHtml(f.name)}"><span class="ic">📄</span><span class="name">${escapeHtml(f.name)}</span></div>`
+    `<div class="node file" data-relpath="${escapeHtml(f.name)}"><span class="ic">📄</span><span class="name">${escapeHtml(f.name)}</span>
+      <button class="download-btn" data-download="${escapeHtml(f.name)}" title="скачать">⭳</button>
+    </div>`
   ).join('');
 
   ['source', 'outer', 'result'].forEach(bucket => {
@@ -570,6 +575,9 @@ function renderTree(tree) {
       if (/\.(md|txt)$/i.test(relpath)) openEditor(relpath);
       else downloadFile(relpath);
     });
+  });
+  document.querySelectorAll('.tree [data-download]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(btn.dataset.download); });
   });
   document.querySelectorAll('.tree [data-move]').forEach(btn => {
     btn.addEventListener('click', (e) => { e.stopPropagation(); moveEntry(btn.dataset.move); });

@@ -199,7 +199,14 @@ def list_tree(user: str, project_path: str, config) -> dict:
 
 
 def read_file(user: str, project_path: str, relative_path: str, config) -> dict:
-    _, candidate = resolve_file_path(user, project_path, relative_path, config)
+    project_root, candidate = resolve_file_path(user, project_path, relative_path, config)
+    # Читающие пути раньше не чинили владельца (D-024, 2026-08-06) — файлы,
+    # которые песочница пишет от root (обход approval-блока на python3 -c
+    # инлайн-командах, см. D-024), оставались недоступны для чтения этим
+    # процессом (hermes) до следующего хода чата/записи. self-heal должен
+    # стоять перед любым обращением к дереву проекта, не только перед
+    # записью — см. D-012.
+    permissions.ensure_ownership_sync(project_root)
     if not os.path.isfile(candidate):
         raise WorkspaceError(f"файл не найден: {relative_path}")
     with open(candidate, "rb") as fh:

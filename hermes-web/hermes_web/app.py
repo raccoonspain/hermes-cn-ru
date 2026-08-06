@@ -16,7 +16,7 @@ import urllib.parse
 import aiohttp
 from aiohttp import web
 
-from . import admin_metrics, auth, hermes_client, projects, quickchat, storage, workspace
+from . import admin_metrics, auth, hermes_client, permissions, projects, quickchat, storage, workspace
 
 logger = logging.getLogger(__name__)
 
@@ -400,7 +400,13 @@ async def handle_project_file_get(request: web.Request) -> web.Response:
     file_param = request.query.get("file", "")
     download = request.query.get("download") == "1"
     try:
-        _, candidate = workspace.resolve_file_path(user["username"], path, file_param, request.app["quickchat_config"])
+        project_root, candidate = workspace.resolve_file_path(user["username"], path, file_param, request.app["quickchat_config"])
+        # Тот же класс бага, что и в workspace.read_file (D-024, 2026-08-06):
+        # эта ручка отдаёт файл через web.FileResponse (sendfile от лица
+        # процесса hermes-dashboard), и раньше ничего не чинила владельца —
+        # root-owned файлы из докер-песочницы отдавали permission-ошибку
+        # вместо содержимого, пока не подойдёт следующий ход чата/записи.
+        permissions.ensure_ownership_sync(project_root)
         if not os.path.isfile(candidate):
             raise workspace.WorkspaceError(f"файл не найден: {file_param}")
     except (projects.project_index_core.ProjectIndexError, workspace.WorkspaceError):
