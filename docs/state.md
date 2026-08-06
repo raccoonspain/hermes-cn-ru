@@ -1203,6 +1203,16 @@ Hermes-плагин `project_index` (embeddings-индекс + `project_move`) �
   всегда `127.0.0.1:9119` на сервере. Открыть у себя в браузере:
   `ssh -L 9119:127.0.0.1:9119 root@212.115.55.116` (PowerShell/терминал, держать
   окно открытым), затем `http://127.0.0.1:9119`
+- Наш веб-интерфейс проекта (файловое дерево/чат): `hermes-web.service`
+  (systemd user-юнит), код на сервере — `~/hermes-web/`, та же папка
+  зеркалится в `hermes-cn-ru` только через ручной sync при правках
+  (не git-репо на сервере) — см. D-026.
+- `hermes-workspace-root-sweep.timer` (systemd **system**-юнит, root,
+  `/etc/systemd/system/`, каждые 30с) — превентивно чинит владельца
+  root-owned файлов внутри `/home/hermes/workspace` (докер-песочница
+  Hermes иногда пишет файлы от root, апстрим issue #32049, см. D-012/
+  D-029). Дополняет реактивную самопочинку `hermes-fix-workspace-perms.sh`
+  (та вызывается по требованию из `hermes-web`), не заменяет её.
 
 ### Документы
 - Бриф: [project-brief.md](./project-brief.md)
