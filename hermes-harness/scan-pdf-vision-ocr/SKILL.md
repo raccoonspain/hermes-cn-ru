@@ -3,7 +3,7 @@ name: scan-pdf-vision-ocr
 description: "Use when a PDF is image-only (no text layer) and you need to read it, extract tasks/questions/figures, or assemble an md file. Renders pages with PyMuPDF, OCRs text with rapidocr-onnxruntime, uses vision_analyze for figures/graphs and pages rapidocr can't read, crops figures via PIL."
 tags: ["PDF", "OCR", "vision", "scans", "textbook", "images", "markdown"]
 related_skills: ["ocr-and-documents", "pdf", "vision_analyze"]
-version: 1.10.0
+version: 1.11.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -63,6 +63,24 @@ metadata:
 > baseline from 2026-08-05, say so plainly and don't quietly fall back —
 > report it so the config can be reverted or re-tuned.
 
+> **Every Python snippet you run in this skill — write it to a file first,
+> never `python3 -c "..."` or bare `execute_code` (recurring friction,
+> confirmed twice in one day, 2026-08-06).** Two live runs in a row on the
+> same document opened with 4–5 wasted turns fumbling
+> `pending_approval`/`execute_code` rejections on the Step 1 text-layer
+> check before landing on the same working pattern by trial and error —
+> this rule already existed lower down in Pitfalls, but buried where the
+> first thing you do in a fresh session doesn't see it. Fix, from the very
+> first tool call of the session: `write_file` a `.py` script into
+> `/workspace/<project>/...`, then `terminal('python3 script.py')`. Never
+> `python3 -c "..."`, never heredoc `python << EOF`, never bare
+> `execute_code` with inline code that spawns subprocesses or touches
+> files — all three trip the one-shot-approval gate with nobody there to
+> `/approve`. This costs ~5 API calls and ~30s every time it's rediscovered
+> instead of just followed — see the full pattern under "execute_code
+> script-execution pattern" in Pitfalls, and Step 1 below for the
+> already-correct version of the detection snippet.
+
 Read image-only (scanned) PDFs by rendering pages to PNG with PyMuPDF and
 letting `vision_analyze` do the OCR. The pattern is meant for **assembling
 markdown notes** — textbooks, problem sets, scanned worksheets, archive
@@ -86,9 +104,14 @@ Do **not** use this skill when:
 
 ## Step 1 — Detect the situation
 
-Render page 1 with PyMuPDF and inspect text length:
+Render page 1 with PyMuPDF and inspect text length. **Write this to a
+file and run it — don't type it as `python3 -c` or `execute_code`, both
+hit `pending_approval` with nobody there to approve (see the callout
+above).**
 
 ```python
+# write_file('/workspace/<project>/detect.py', <this>), then
+# terminal('python3 /workspace/<project>/detect.py')
 import fitz
 doc = fitz.open('/path/to/file.pdf')
 print(len(doc[0].get_text()))   # < 50 chars → image-only
@@ -317,6 +340,51 @@ wrong. This costs more than Step 2.5's default path; that's the deal the
 user asked for. Don't default into it for ordinary "just get me the text"
 requests — ask if unclear, don't assume.
 
+**Flag disagreement between the two engines instead of re-polling one of
+them (verified 2026-08-06, same document, two runs — this is the
+preferred method, not a fallback).** The first live test of this Step
+(2026-08-06 morning) hit an ambiguous handwritten signature and tried to
+resolve it by calling `vision_analyze` on the same crop repeatedly, hoping
+for a stable answer: 5 calls, 5 different surnames (Муртаева, Цуцоева,
+Миронова, Мустова, Мудова), no consensus — exactly the anti-pattern the
+older "Budget: 1 vision call per token" Pitfall below already warns
+against, and it still happened because there was no *other* signal telling
+the agent to stop. The second live test on the identical document
+(2026-08-06, later the same day) resolved the same class of ambiguity
+completely differently: one `rapidocr` pass (with its per-line confidence
+score) and one `vision_analyze` pass, compared directly. Where they
+agreed and confidence was high, no further work. Where they disagreed —
+`rapidocr` "С.В. Показеева" (0.79 conf) vs `vision_analyze` "Мухомова
+И.Ю." on the same line — that disagreement *is* the answer to "is this
+ambiguous?", stated once, no polling needed:
+
+```markdown
+> ⚠ Подписи — рукописные, vision нестабилен на них. OCR прочитал их как
+> «С.В. Показеева» (rapidocr, 0.79 conf) и «Мухомова И.Ю.» (vision, на
+> той же строке). Рекомендуется сверить с бумажным оригиналом.
+```
+
+Same honesty (⚠, both readings shown, no fabricated single answer), same
+outcome for the user — but **4 `vision_analyze` calls total for a
+4-page document instead of 13**, turn time **11m16s instead of 20m**
+(measured from `agent.log`, not estimated), noticeably less context/token
+growth too. The mechanism: cross-checking two *independently-failing*
+engines (a classical OCR model and a vision LLM, which make different
+kinds of mistakes) surfaces uncertainty in one comparison, where re-asking
+the *same* engine the *same* question repeatedly only surfaces uncertainty
+if you get lucky enough to see two different answers — and even then
+doesn't tell you which (if either) is right, just that you should keep
+guessing. **Rule: when Step 2.6 applies, one `rapidocr` pass + one
+`vision_analyze` pass per page is the default budget. Escalate to a
+targeted zoom-crop + second vision call only for a token where the two
+engines' readings are both present but plausible-different (not simply
+"vision looked uncertain") — and even then, cap it at one extra call, not
+an open-ended retry loop.** This supersedes the older polling-based
+"Budget: 1 vision call per token" guidance in Pitfalls below where a
+`rapidocr` reading exists to compare against; that older guidance still
+applies as-is for tokens `rapidocr` has no reading for at all (e.g. inside
+a figure, or a page vision-only covers).
+
 ## Step 3 — Locate content with `vision_analyze`
 
 Send the whole page first to learn the structure (which tasks/headings are
@@ -509,11 +577,9 @@ Embed the cropped PNGs with relative `./` paths so the md is portable.
   6. **Don't loop on `vision_analyze` retry.** When vision returns 400 on a Russian document, the fastocr-via-rapidocr path is your friend. Vision's value here is in *layout questions* ("which task numbers are on this page"), not in *transcription* of a document rapidocr can already read (in homoglyph form).
   7. **In the final md**, mark every uncertain reconstruction with `⚠` in a dedicated table — name/abbreviation/date that OCR couldn't pin down. Tell the user explicitly: "это юридический документ, любая ошибка OCR критична, сверяйте по скану". Better one round of clarification than a confidently-wrong explanation that goes into a real labor dispute file.
 - **CORRECTED 2026-08-05 (D-023) — there is no CWD bug.** A prior version of this entry claimed the bundled Cyrillic config "breaks with non-default CWD" because `Det`/`Cls` model paths are relative. **That was a misdiagnosis, not a real bug** — live-verified: `RapidOCR(config_path=".../models/rapidocr-cyrillic/config.yaml")` loads and OCRs correctly from `/workspace` (an ordinary project CWD), zero errors. `update_model_path()` in `rapidocr_onnxruntime` always resolves relative `Det`/`Cls` paths against the package's own directory (a module constant), never against CWD. Whatever actually went wrong in the session that produced the original entry, it wasn't this — don't spend time re-copying configs or `cd`-ing into the package directory to "fix" it. If `RapidOCR(...)` genuinely returns 0 lines, check `os.path.exists(config_path)` and read the real exception first.
-- **`terminal(command=..., timeout=N)` does NOT kill subprocess children when it times out (verified 2026-08-05, reocr_5page batch).** Symptom: `terminal(...)` returns `exit_code=124` after the timeout, but `ps aux` shows both the parent script and the inner `python3 ocr_one_subprocess.py` are still running, consuming CPU and RAM invisibly across subsequent turns. If a later OCR call hits the `pthread_create failed` pitfall *after* a timeout was reported as clean, suspect leaked subprocess children. **Fix:** after any timeout, run `ps aux | grep -iE "python3.*ocr|python3.*reocr"` and `kill -9 <pids>` any leftovers before starting the next OCR work — or better, use `scripts/ocr_page.py` per-page (D-023: ~18-25s per call after the thread fix, well under any reasonable timeout) instead of a long-running multi-page orchestrator that can itself get killed mid-flight.
-- **Use `vision_analyze` as a tiebreaker for ONE specific OCR uncertainty, not as a re-OCR of the whole document (verified 2026-08-05 on a Cyrillic ДИ signature).** Pattern: when rapidocr returns a low-confidence or partially-Latin reading of a specific token (e.g. a surname at the end of a document — `A.C.Вenин` with mixed Cyrillic/Latin), don't re-OCR the whole page — crop a tight bounding box around just that token (e.g. `Image.crop((1700, 2480, 2300, 2620))`), upscale 2–3× with LANCZOS, save to PNG, and call `vision_analyze` on the crop with a narrow prompt like *"Прочти одну русскую фамилию из 5 букв справа от инициалов «А.С.». Перечисли все возможные варианты, какие видишь."* Vision returned `Венин` with high confidence on a name that rapidocr had read as the homoglyph-looking `A.C.Вenин` — and crucially vision also said *"characters are clear, well-defined, and printed (not handwritten or cursive)"*, which ruled out the OCR-confusion-with-`Б` hypothesis and told me the document really does print the surname in mixed Cyrillic/Latin (a real-world quirk of the original). This is cheaper (one small image) than full-page re-OCR and *also* answers meta-questions rapidocr can't ("is this handwritten?", "are these marks actually part of the text or noise?"). Budget: 1 vision call per truly-ambiguous token. Don't burn 5 calls on the same crop trying different prompts — the first one usually answers.
 - **Token cost — don't let raw OCR text bloat the session (D-023, 2026-08-05).** A single document-digitization task grew one chat session to 195 messages / 332 KB of exported history (up from ~79 KB after page 1 alone) — largely from OCR dumps, homoglyph tables, and line-by-line v1-vs-v2 comparisons pasted directly into the agent's own reasoning/responses. Every subsequent turn in that session re-processes the *entire* accumulated history as input context — this, not the OCR compute itself, is the most likely dominant cost driver on a multi-page job. **Rule: raw OCR output goes to a file (`scripts/ocr_page.py` already does this), never pasted in full into your own response.** When you need to check something specific, `grep`/`sed` the file for that line, don't `cat` the whole thing into your reasoning. When comparing two OCR passes, diff the *files* and quote only the differing lines, not both full transcripts.
 - **`terminal(command=..., timeout=N)` does NOT kill subprocess children when it times out (verified 2026-08-05, reocr_5page batch).** Symptom: `terminal(...)` returns `exit_code=124` after the timeout, but `ps aux` shows both the parent script and the inner `python3 ocr_one_subprocess.py` are still running, consuming CPU and RAM invisibly across subsequent turns. If a later OCR call hits the `pthread_create failed` pitfall *after* a timeout was reported as clean, suspect leaked subprocess children. **Fix:** after any timeout, run `ps aux | grep -iE "python3.*ocr|python3.*reocr"` and `kill -9 <pids>` any leftovers before starting the next OCR work. Better: design your script so each subprocess is a separate `subprocess.run([...], timeout=...)` call that *Python* kills itself if it overruns — `subprocess.run` with `timeout=` raises `TimeoutExpired` and the subprocess is reaped. If you must use a top-level Python orchestrator (e.g. a long batch loop), wrap each page's OCR in its own `subprocess.run([...], timeout=120)` so a slow page doesn't block the whole batch, and kill the parent on exception.
-- **Use `vision_analyze` as a tiebreaker for ONE specific OCR uncertainty, not as a re-OCR of the whole document (verified 2026-08-05 on a Cyrillic ДИ signature).** Pattern: when rapidocr returns a low-confidence or partially-Latin reading of a specific token (e.g. a surname at the end of a document — `A.C.Вenин` with mixed Cyrillic/Latin), don't re-OCR the whole page — crop a tight bounding box around just that token (e.g. `Image.crop((1700, 2480, 2300, 2620))`), upscale 2–3× with LANCZOS, save to PNG, and call `vision_analyze` on the crop with a narrow prompt like *"Прочти одну русскую фамилию из 5 букв справа от инициалов «А.С.». Перечисли все возможные варианты, какие видишь."* Vision returned `Венин` with high confidence on a name that rapidocr had read as the homoglyph-looking `A.C.Вenин` — and crucially vision also said *"characters are clear, well-defined, and printed (not handwritten or cursive)"*, which ruled out the OCR-confusion-with-`Б` hypothesis and told me the document really does print the surname in mixed Cyrillic/Latin (a real-world quirk of the original). This is cheaper (one small image) than full-page re-OCR and *also* answers meta-questions rapidocr can't ("is this handwritten?", "are these marks actually part of the text or noise?"). Budget: 1 vision call per truly-ambiguous token. Don't burn 5 calls on the same crop trying different prompts — the first one usually answers.
+- **Use `vision_analyze` as a tiebreaker for ONE specific OCR uncertainty, not as a re-OCR of the whole document (verified 2026-08-05 on a Cyrillic ДИ signature).** Pattern: when rapidocr returns a low-confidence or partially-Latin reading of a specific token (e.g. a surname at the end of a document — `A.C.Вenин` with mixed Cyrillic/Latin), don't re-OCR the whole page — crop a tight bounding box around just that token (e.g. `Image.crop((1700, 2480, 2300, 2620))`), upscale 2–3× with LANCZOS, save to PNG, and call `vision_analyze` on the crop with a narrow prompt like *"Прочти одну русскую фамилию из 5 букв справа от инициалов «А.С.». Перечисли все возможные варианты, какие видишь."* Vision returned `Венин` with high confidence on a name that rapidocr had read as the homoglyph-looking `A.C.Вenин` — and crucially vision also said *"characters are clear, well-defined, and printed (not handwritten or cursive)"*, which ruled out the OCR-confusion-with-`Б` hypothesis and told me the document really does print the surname in mixed Cyrillic/Latin (a real-world quirk of the original). This is cheaper (one small image) than full-page re-OCR and *also* answers meta-questions rapidocr can't ("is this handwritten?", "are these marks actually part of the text or noise?"). Budget: 1 vision call per truly-ambiguous token. Don't burn 5 calls on the same crop trying different prompts — the first one usually answers. **Superseded as the default for tokens `rapidocr` also read (2026-08-06, see "Flag disagreement between the two engines instead of re-polling one of them" in Step 2.6 above) — reach for this crop-and-poll pattern only when there is no second engine's reading to compare against at all (a token that's inside a figure, or a vision-only page).**
 - **Embedded JPEG in scanned PDF may be rotated 90° relative to the page (verified 2026-08-05 on a children's picture book).** `doc.extract_image(xref)` returns the **raw** JPEG bytes — dimensions are the image's native orientation. But the image may be placed on the page via a transformation matrix so `page.get_image_rects(xref)` returns a bbox rotated 90° relative to the page rect. Symptom that the user will report verbatim: *"Особенно, если картинка повернута на 90 градусов"* — and they will also complain that *"Вставлять целиком страницу скана с английским языком — это бред"* if you don't catch and rotate.
 
   Detection:
