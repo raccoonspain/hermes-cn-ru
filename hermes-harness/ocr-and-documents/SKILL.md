@@ -1,7 +1,7 @@
 ---
 name: ocr-and-documents
 description: "Extract text from PDFs/scans (pymupdf, marker-pdf)."
-version: 2.7.0
+version: 2.8.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -62,9 +62,12 @@ needed). **Call it via `scan-pdf-vision-ocr`'s `scripts/ocr_page.py <img> <out.t
 not a bare inline `RapidOCR()` — two things depend on it: (1) **Cyrillic (Russian) text needs the
 `cyrillic` model** — the stock model has no Cyrillic in its vocabulary and silently emits Latin
 lookalikes instead (`С`→`C`, `Н`→`H`...) rather than failing loudly (root cause and fix: D-022,
-2026-08-05); (2) **both bundled configs force single-threaded inference**, which is a 4x speedup
-on this sandbox (71s→17.5s per full page) because the container is capped at 1 vCPU regardless of
-what `nproc` reports — see that skill's Step 2.5 (D-023, 2026-08-05). Reach for `marker-pdf` only when you actually need tables, equations, or reading-order-aware
+2026-08-05); (2) **both bundled configs force 4-threaded inference** (superseded 2026-08-07, D-035
+— was single-threaded, D-023 2026-08-05), which is the fast setting on this sandbox now that it's
+genuinely 4 vCPU (D-034, 2026-08-06 — the container had silently frozen at a stale 1.0 vCPU
+reading since creation, fixed live; `nproc` still over-reports 8, that part is unchanged) —
+1 thread 27.3s, 4 threads 11.6s per full page on the re-measured benchmark — see that skill's
+Step 2.5. Reach for `marker-pdf` only when you actually need tables, equations, or reading-order-aware
 markdown from a scan — those are real gaps in rapidocr, not marker-pdf being generally "better OCR".
 Reach for `vision_analyze` on a scanned page only when rapidocr's output looks wrong/garbled on
 inspection, or the task needs genuine visual understanding (a diagram, a graph, handwriting rapidocr

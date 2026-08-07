@@ -3,17 +3,25 @@ for this skill as of 2026-08-05 (D-023). Replaces ad-hoc inline OCR snippets.
 
 Why this exists instead of calling `RapidOCR()` inline:
   1. **Thread count.** The bundled configs this script uses force
-     `intra_op_num_threads`/`inter_op_num_threads` to `1`. The sandbox
-     container is capped at 1.0 vCPU (`docker inspect`: NanoCpus=1e9), but
-     the package default (`-1`/"auto") makes onnxruntime spawn one thread
-     per HOST-visible core (`nproc` reports 8) — 8 threads fighting over a
-     1-core cgroup quota. Forcing 1 thread cut a full-page call from 71s to
-     17.5s on the same image, byte-identical output (verified, not assumed).
-     **Do not try to go faster by running several OCR calls concurrently
-     instead** — the 1-vCPU cap is process-wide, so concurrent calls just
-     divide that one core more ways (tested: 4 concurrent calls, ~114s
-     each, ~117s total wall time — worse than 4 sequential calls at
-     17.5s = 70s total). Sequential, one page at a time, is the fast path.
+     `intra_op_num_threads`/`inter_op_num_threads` to `4` (superseded
+     2026-08-07, D-035 — was `1`, tuned back when the sandbox container
+     was misread as 1.0 vCPU; D-034 found and fixed that the container
+     had silently frozen at a stale 1.0 vCPU limit from creation time
+     while `config.yaml` said 4 all along, and made the real limit match
+     the config going forward). Re-measured on the real 4-vCPU container:
+     1 thread 27.3s, 2 threads 16.2s, **4 threads 11.6s**, -1/auto 19.8s —
+     byte-identical output at every setting. `-1`/"auto" is still worse
+     than 4: it makes onnxruntime spawn one thread per HOST-visible core
+     (`nproc` reports 8) — 8 threads oversubscribing a real 4-core quota,
+     same shape of problem as before, just less severe.
+     **Running several OCR calls concurrently now genuinely helps** (it
+     didn't before D-034, when the container really was 1 core) — 4
+     concurrent single-threaded calls finished a 4-page batch in ~38s wall
+     time (~9.5s/page) vs 46.4s sequential at 4 threads/call. Not wired up
+     here on purpose: ~18% faster isn't worth a subprocess-pool
+     orchestrator for this single-page entry point. If a future batch job
+     needs more throughput than sequential 4-threads-per-call, that's the
+     next lever — see `models/rapidocr-cyrillic/config.yaml`.
   2. **Cyrillic.** `--lang cyrillic` swaps in the bundled
      `models/rapidocr-cyrillic` recognition model. The package's own
      default model is Chinese+English — on Cyrillic text it has no
@@ -54,9 +62,9 @@ import sys
 import time
 import argparse
 
-os.environ.setdefault('OMP_NUM_THREADS', '1')
-os.environ.setdefault('MKL_NUM_THREADS', '1')
-os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
+os.environ.setdefault('OMP_NUM_THREADS', '4')
+os.environ.setdefault('MKL_NUM_THREADS', '4')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '4')
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIGS = {

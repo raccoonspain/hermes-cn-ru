@@ -19,11 +19,14 @@ import os
 from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
 
-# Thread-fixed bundled config (D-023, 2026-08-05) — package default
-# `intra_op_num_threads: -1` spawns one thread per host-visible core (8)
-# on a container capped at 1.0 vCPU, ~4x slower than forcing 1 thread for
-# identical output. `lang='cyrillic'` for Russian scans (D-022 — default
-# rec model has no Cyrillic in its vocabulary, not just "worse" on it).
+# Thread-fixed bundled config (superseded 2026-08-07, D-035 — was forced to
+# 1, D-023 2026-08-05; sandbox container is genuinely 4 vCPU as of D-034,
+# not the 1.0 vCPU it had silently frozen at). Package default
+# `intra_op_num_threads: -1` still loses — it spawns one thread per
+# host-visible core (8), oversubscribing the real 4-core quota. 4 measured
+# fastest (11.6s vs 27.3s at 1 thread, 19.8s at -1/auto), identical output.
+# `lang='cyrillic'` for Russian scans (D-022 — default rec model has no
+# Cyrillic in its vocabulary, not just "worse" on it).
 _SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

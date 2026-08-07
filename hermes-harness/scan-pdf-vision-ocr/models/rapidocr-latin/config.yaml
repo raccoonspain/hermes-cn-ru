@@ -10,17 +10,18 @@ Global:
     min_side_len: 30
     return_word_box: false
 
-    # Stock Det/Rec/Cls models (Chinese+English/Latin), but with threads
-    # forced to 1 instead of the package default -1/"auto" (D-023,
-    # 2026-08-05). This sandbox container is capped at 1.0 vCPU (`docker
-    # inspect`: NanoCpus=1e9) but `-1` makes onnxruntime spawn one thread
-    # per HOST-visible core (`nproc` reports 8) — 8 threads fighting over
-    # a 1-core cgroup quota. Forcing 1 thread cut a full-page OCR call
-    # from 71s to 17.5s on the same image, byte-identical output. Use
-    # this config (not bare `RapidOCR()`) for any non-Cyrillic document —
-    # for Cyrillic use `models/rapidocr-cyrillic/config.yaml` instead.
-    intra_op_num_threads: &intra_nums 1
-    inter_op_num_threads: &inter_nums 1
+    # Stock Det/Rec/Cls models (Chinese+English/Latin), threads forced to 4
+    # (superseded 2026-08-07, D-035 — was 1, see the long comment in
+    # `models/rapidocr-cyrillic/config.yaml` for the full history: 1 vCPU
+    # was itself a stale-container artifact fixed by D-034, and 4 threads
+    # measured fastest on the real 4-vCPU container, same numbers as the
+    # cyrillic config since it's the same onnxruntime session mechanics).
+    # Still not `-1`/"auto" — that spawns one thread per HOST-visible core
+    # (`nproc` reports 8), oversubscribing the real 4-core quota. Use this
+    # config (not bare `RapidOCR()`) for any non-Cyrillic document — for
+    # Cyrillic use `models/rapidocr-cyrillic/config.yaml` instead.
+    intra_op_num_threads: &intra_nums 4
+    inter_op_num_threads: &inter_nums 4
 
 Det:
     intra_op_num_threads: *intra_nums

@@ -41,11 +41,19 @@ if os.path.exists(progress_path):
 else:
     pages = {}
 
-# Restrict threads to avoid pthread_create failure on this sandbox.
+# Thread count matches the sandbox's real CPU quota (superseded 2026-08-07,
+# D-035 — was 1, D-023 2026-08-05; container is genuinely 4 vCPU as of
+# D-034, config.yaml's thread setting now matches). The pthread_create
+# crash mentioned above is a separate, still-live concern — it comes from
+# multiple engines/OCR subprocesses alive at once against `pids.max=256`,
+# not from this per-engine thread count — the one-subprocess-per-column
+# design above is what actually prevents it, keep that serialized.
+# ocr_one_subprocess.py sets these itself too; kept here for clarity/in
+# case env is read before that import.
 env = os.environ.copy()
-env['OMP_NUM_THREADS'] = '1'
-env['MKL_NUM_THREADS'] = '1'
-env['OPENBLAS_NUM_THREADS'] = '1'
+env['OMP_NUM_THREADS'] = '4'
+env['MKL_NUM_THREADS'] = '4'
+env['OPENBLAS_NUM_THREADS'] = '4'
 env['PYTHONPATH'] = '/workspace/pylib'
 
 OCR_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -61,9 +69,11 @@ def ocr_subprocess(path, json_path):
         # --lang cyrillic: Kirik is a Russian textbook — the default rec
         # model has no Cyrillic in its vocabulary at all (D-022), not just
         # "worse" on it. Timeout dropped 180s→60s: the thread fix (D-023)
-        # cuts a full-page call to ~20s at this crop size; 60s is still a
-        # generous margin, and a lower timeout fails fast instead of
-        # sitting on a hung call.
+        # cut a full-page call to ~20s at this crop size on the (then
+        # mistakenly 1.0 vCPU) sandbox; 60s stays a generous margin at 4
+        # threads on the real 4-vCPU container (D-035, 2026-08-07) — not
+        # re-measured at this exact column-crop size, but full-page timing
+        # only got faster (11.6s vs 27.3s at 1 thread), never slower.
         ['python3', OCR_SCRIPT, path, json_path, '--lang', 'cyrillic'],
         env=env, capture_output=True, text=True, timeout=60
     )

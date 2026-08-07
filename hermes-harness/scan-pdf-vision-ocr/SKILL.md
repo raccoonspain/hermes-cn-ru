@@ -3,7 +3,7 @@ name: scan-pdf-vision-ocr
 description: "Use when a PDF is image-only (no text layer) and you need to read it, extract tasks/questions/figures, or assemble an md file. Renders pages with PyMuPDF, OCRs text with rapidocr-onnxruntime, uses vision_analyze for figures/graphs and pages rapidocr can't read, crops figures via PIL."
 tags: ["PDF", "OCR", "vision", "scans", "textbook", "images", "markdown"]
 related_skills: ["ocr-and-documents", "pdf", "vision_analyze"]
-version: 1.13.1
+version: 1.14.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -15,8 +15,8 @@ metadata:
       - references/render-and-crop.md    # PyMuPDF render + PIL crop recipes
       - references/embedded-jpeg-rotation.md  # 90°-rotated JPEG inside scanned PDF (added 2026-08-05)
       - references/cyrillic-homoglyph-recovery.md  # FALLBACK ONLY as of 2026-08-05 — superseded by models/rapidocr-cyrillic/, see D-022
-      - models/rapidocr-cyrillic/config.yaml  # bundled cyrillic_PP-OCRv5_mobile_rec model + thread fix, use via scripts/ocr_page.py --lang cyrillic (D-022, D-023)
-      - models/rapidocr-latin/config.yaml  # stock Det/Rec/Cls + thread fix (4x speedup, D-023) — default for non-Cyrillic docs, use via scripts/ocr_page.py --lang latin
+      - models/rapidocr-cyrillic/config.yaml  # bundled cyrillic_PP-OCRv5_mobile_rec model + thread fix (4 threads, matches real 4-vCPU sandbox — D-035), use via scripts/ocr_page.py --lang cyrillic (D-022, D-023, D-035)
+      - models/rapidocr-latin/config.yaml  # stock Det/Rec/Cls + thread fix (4 threads, ~2.3x speedup over 1 thread — D-035) — default for non-Cyrillic docs, use via scripts/ocr_page.py --lang latin
       - references/kirik-session.md      # kirik-kinematika concrete lessons
       - references/galanz-aerogril-session.md  # 3-page scan → RU .docx, two-column OCR fix, vision 400
       - references/graph-curve-extraction.md  # pure-PIL graph data recovery when vision is down
@@ -37,16 +37,25 @@ metadata:
 > single most important behavior to internalize — it's been flagged by
 > the user twice (Kirik 9–18 session, 2026-08-03) because it manifests
 > as "several OCR processes competing for CPU, sandbox OOMs, every
-> subsequent vision/OCR call times out". **This container is capped at
-> 1.0 vCPU** (`docker inspect`: `NanoCpus=1e9`) even though `nproc`
-> reports 8 — that 8 is host-visible, not container-available (D-023,
-> 2026-08-05). Concurrency doesn't help here; it just divides the one
-> real core more ways and makes every call slower. If you start a fresh
-> inline OCR loop without reading that pitfall, you'll burn the session
-> fighting `pthread_create failed` errors. Use `scripts/ocr_page.py` for
-> a single page/image (the default entry point, D-023) or
+> subsequent vision/OCR call times out". **This container is genuinely 4
+> vCPU** (`docker inspect`: `NanoCpus=4e9`, confirmed via
+> `/sys/fs/cgroup/cpu.max` too — D-034, 2026-08-06 fixed a stale 1.0 vCPU
+> reading the container had silently frozen at since creation; `nproc`
+> reporting 8 is still host-visible, not container-available, that part
+> hasn't changed). Bundled configs now force 4 threads per engine to
+> match (D-035, 2026-08-07 — was 1, tuned for the old mistaken 1.0 vCPU
+> reading). **Running several *engines*/subprocesses concurrently still
+> isn't the default here, and for a different reason than before**: it's
+> `pids.max=256` exhaustion (`pthread_create failed`) from stacking up
+> engines over a session, not CPU starvation — see the Pitfalls entry.
+> Small controlled bursts (2–4 concurrent single-threaded calls) measured
+> ~18% faster throughput than sequential 4-threads-per-call (D-035), but
+> that's not wired into either script below — use `scripts/ocr_page.py`
+> for a single page/image (the default entry point) or
 > `scripts/batch_ocr_kirik.py` (resumable, json-checkpoint,
-> subprocess-per-column) instead of an inline orchestrator.
+> subprocess-per-column, serialized on purpose) instead of an inline
+> orchestrator, and don't hand-roll concurrency without re-reading the
+> Pitfalls entry on `pids.max`.
 
 > **Vision model changed 2026-08-06 (live test, supersedes the "low" pick
 > in D-018 for this use case).** `auxiliary.vision.model` in
@@ -260,25 +269,36 @@ whole-page OCR dumps into your own reasoning/response. See "Token cost —
 don't let raw OCR text bloat the session" below for why this matters
 more than it looks.
 
-**Speed: force `intra_op_num_threads`/`inter_op_num_threads` to `1`, not
-the package default `-1` (verified 2026-08-05, D-023) — this alone is a
-4x speedup with byte-identical output.** This sandbox container is capped
-at **1.0 vCPU** (`docker inspect`: `NanoCpus=1e9`), but `-1` ("auto")
-makes onnxruntime spawn one thread per *host-visible* core (`nproc`
-reports 8) — 8 threads fighting over a 1-core cgroup quota. A full-page
-OCR call (2409×3437) went from **71s → 17.5s** on the exact same image
-after forcing 1 thread, verified byte-for-byte identical output. Both
-bundled configs (`models/rapidocr-cyrillic/config.yaml` and
+**Speed: force `intra_op_num_threads`/`inter_op_num_threads` to `4`, not
+`1` and not the package default `-1` (superseded 2026-08-07, D-035 — was
+`1`, D-023 2026-08-05).** This sandbox container is genuinely **4 vCPU**
+(`docker inspect`: `NanoCpus=4e9`; D-034, 2026-08-06, fixed a stale 1.0
+vCPU reading the container had silently frozen at since creation — the
+config said 4 all along). Re-measured on the real container with a
+synthetic full-page Cyrillic test image (the original D-023 scan wasn't
+preserved, so these absolute numbers aren't comparable to the 71s/17.5s
+ones from that decision — only the relative shape is): **1 thread 27.3s,
+2 threads 16.2s, 4 threads 11.6s, -1/auto 19.8s**, byte-identical output
+at every setting (55 lines, avg_conf=0.846 throughout). `-1`/"auto" is
+still worse than 4 — it spawns one thread per *host-visible* core (`nproc`
+reports 8), oversubscribing the real 4-core quota, same shape of problem
+as before, just less severe. Both bundled configs
+(`models/rapidocr-cyrillic/config.yaml` and
 `models/rapidocr-latin/config.yaml`) already have this fix — `ocr_page.py`
 uses them automatically, so you only need to think about this if you're
 calling `RapidOCR()` some other way.
 
-**Do NOT try to go faster by running several OCR calls concurrently
-instead of sequentially — tested, it's slower, not faster (D-023).** The
-1-vCPU cap is container-wide, not per-process: 4 single-threaded OCR
-calls launched at once measured ~114s *each* (~117s total wall time) vs.
-4 sequential calls at 17.5s = 70s total. Concurrency just divides the one
-real core more ways; it doesn't add cores. One page at a time, in order.
+**Running several OCR calls concurrently now genuinely helps a little —
+it didn't before D-034, when the container really was 1 core — but it's
+still not the default here (D-035).** 4 concurrent single-threaded calls
+measured ~9.5s/page-equivalent (4-page batch finished in ~38s wall time)
+vs. ~11.6s/page sequential at 4 threads/call — a real ~18% throughput
+gain, but not enough to justify a subprocess-pool orchestrator on top of
+what `batch_ocr_kirik.py` already does, and it eats into the same
+`pids.max=256` budget that causes the `pthread_create failed` crash below
+if a session already has several engines/processes accumulated. One page
+at a time, in order, stays the default; revisit only if a future batch
+job needs more throughput than sequential 4-threads-per-call gives.
 
 **⚠ There is no CWD-dependence to worry about here — don't rediscover
 this the hard way.** `RapidOCR`'s `update_model_path()` always resolves

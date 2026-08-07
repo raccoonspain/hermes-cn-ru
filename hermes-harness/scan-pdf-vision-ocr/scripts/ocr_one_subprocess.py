@@ -1,14 +1,20 @@
 """OCR one image, save result to JSON.
 
-Designed to be called as a subprocess by `batch_ocr_kirik.py`. Forces single
-threads to avoid the Hermes-sandbox pthread_create failure on RapidOCR.
+Designed to be called as a subprocess by `batch_ocr_kirik.py` — one process,
+one `RapidOCR()` engine, then exit. That serialization is what actually
+avoids the Hermes-sandbox `pthread_create failed` crash (`pids.max=256`,
+see SKILL.md pitfalls): it's triggered by **multiple engines/OCR processes
+alive at once over a session**, not by the thread count of a single engine.
+Keep calling this one-subprocess-per-page, don't parallelize call sites.
 
-**Uses the bundled thread-fixed config by default (D-023, 2026-08-05)** —
-`intra_op_num_threads`/`inter_op_num_threads` forced to 1 instead of the
-package's own `-1`/"auto". This container is capped at 1.0 vCPU, but `-1`
-makes onnxruntime spawn one thread per host-visible core (8) — 8 threads
-fighting over a 1-core quota. Forcing 1 thread cut a full-page OCR call
-from 71s to 17.5s, byte-identical output. For new code, prefer
+**Uses the bundled thread-fixed config by default (superseded 2026-08-07,
+D-035 — was 1, D-023 2026-08-05)** — `intra_op_num_threads`/
+`inter_op_num_threads` forced to `4`, matching the sandbox container's real
+CPU quota (D-034 fixed a stale 1.0 vCPU reading the container had been
+stuck on; config said 4 all along). Re-measured on the real 4-vCPU
+container: 1 thread 27.3s, 4 threads 11.6s, -1/auto 19.8s (still worse than
+4 — spawns one thread per host-visible core, 8, oversubscribing 4 real
+cores) — byte-identical output at every setting. For new code, prefer
 `ocr_page.py` instead — this file stays for `batch_ocr_kirik.py`'s
 existing call site.
 
@@ -20,9 +26,9 @@ import sys
 import json
 import argparse
 
-os.environ['OMP_NUM_THREADS'] = '1'
-os.environ['MKL_NUM_THREADS'] = '1'
-os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '4'
+os.environ['MKL_NUM_THREADS'] = '4'
+os.environ['OPENBLAS_NUM_THREADS'] = '4'
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIGS = {

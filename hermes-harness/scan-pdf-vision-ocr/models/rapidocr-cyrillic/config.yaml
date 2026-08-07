@@ -10,18 +10,38 @@ Global:
     min_side_len: 30
     return_word_box: false
 
-    # Forced to 1, NOT -1/"auto" (verified 2026-08-05, D-023): this sandbox
-    # container is capped at 1.0 vCPU (`docker inspect`: NanoCpus=1e9),
-    # but `-1` makes onnxruntime spawn one thread per HOST-visible core
-    # (`nproc` reports 8) — 8 threads fighting over a 1-core cgroup quota.
-    # Forcing 1 thread cut a full-page OCR call from 71s to 17.5s on the
-    # exact same image, byte-identical output (verified, not assumed).
-    # Do NOT try to compensate by running multiple OCR calls concurrently
-    # instead — same 1-vCPU cap applies process-wide, so concurrent calls
-    # just divide that one core more ways (tested: 4 concurrent calls,
-    # ~114s each, ~117s total wall time — worse than 4×17.5s=70s sequential).
-    intra_op_num_threads: &intra_nums 1
-    inter_op_num_threads: &inter_nums 1
+    # Forced to 4, matching the sandbox container's real CPU quota — NOT 1
+    # (superseded 2026-08-07, D-035) and NOT -1/"auto" (superseded
+    # 2026-08-05, D-023). The container was pinned at 1.0 vCPU when D-023
+    # measured this (`docker inspect`: NanoCpus=1e9), so forcing 1 thread
+    # beat `-1` (which spawns one thread per HOST-visible core — `nproc`
+    # reports 8 — fighting over a 1-core cgroup quota). D-034 (2026-08-06)
+    # found and fixed that 1.0 vCPU reading itself: `container_cpu: 4` had
+    # been the config's intent since D-004, but both persistent sandbox
+    # containers had silently frozen at 1.0 vCPU from creation-time and
+    # never picked up the config (`docker run --cpus` only applies at
+    # container creation; `container_persistent: true` meant they never
+    # recreated). Fixed with `docker update --cpus 4` + a sync script that
+    # re-applies it on every gateway restart — confirmed via
+    # `/sys/fs/cgroup/cpu.max` → `400000 100000` = a real 4.0 CPU quota,
+    # not just Docker metadata. Re-measured on the actual 4-vCPU container
+    # (2026-08-07, D-035, synthetic full-page Cyrillic test image — the
+    # original D-023 scan wasn't preserved, so absolute times aren't
+    # comparable across the two measurements, only the relative shape is):
+    # 1 thread 27.3s, 2 threads 16.2s, 4 threads 11.6s, -1/auto 19.8s —
+    # 4 is the fastest, byte-identical output at every setting (55 lines,
+    # avg_conf=0.846 throughout). `-1` is still worse than 4: it spawns 8
+    # threads (host-visible `nproc`) against a real 4-core quota, same
+    # over-subscription shape as before, just less severe.
+    # Concurrent OCR calls were re-tested too (D-035): 4 concurrent calls
+    # at 1 thread each finished a 4-page batch in ~38s wall time (~9.5s/
+    # page) vs 4×11.6s=46.4s sequential at 4 threads/call — real, but only
+    # ~18% faster, and it costs a subprocess-pool orchestrator this skill
+    # doesn't have today. Not built — documented here as the next lever if
+    # a future multi-page batch job (e.g. `batch_ocr_kirik.py`) needs more
+    # throughput than sequential 4-threads-per-call gives.
+    intra_op_num_threads: &intra_nums 4
+    inter_op_num_threads: &inter_nums 4
 
 Det:
     intra_op_num_threads: *intra_nums
