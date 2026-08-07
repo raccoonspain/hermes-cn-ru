@@ -72,7 +72,7 @@ def parse_about_md(text: str) -> dict:
         "description": description,
         "points": points,
         "now": now,
-        "tags": list(frontmatter.get("tags") or []),
+        "tags": [str(t) for t in (frontmatter.get("tags") or [])],
         "status": str(frontmatter.get("status") or "active"),
     }
 

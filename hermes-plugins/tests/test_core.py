@@ -38,6 +38,18 @@ ABOUT_MD_NO_TITLE = """
 Нет названия — должно упасть
 """
 
+ABOUT_MD_NON_STRING_TAG = """---
+tags: [OCR, rapidocr, vision, 2026]
+status: active
+---
+
+# Название проекта
+ДИ ведущего экономиста
+
+# Краткое описание
+Скан, нашедший баг с нестроковым тегом
+"""
+
 
 def test_parse_about_md_full():
     result = core.parse_about_md(ABOUT_MD_FULL)
@@ -58,6 +70,23 @@ def test_parse_about_md_defaults_without_frontmatter():
 def test_parse_about_md_missing_title_raises():
     with pytest.raises(core.ProjectIndexError):
         core.parse_about_md(ABOUT_MD_NO_TITLE)
+
+
+def test_parse_about_md_coerces_non_string_tags_to_str(tmp_path):
+    """A bare unquoted year in YAML (`2026`) parses as int, not str — a real
+    live crash (2026-08-07): `_embed_text`'s `", ".join(about["tags"])` blew
+    up with `TypeError: sequence item 9: expected str instance, int found`
+    on a real about.md an agent wrote without quoting a numeric-looking tag.
+    `status` was already coerced with `str(...)` (line below) — `tags`
+    wasn't. Fix at the single parse choke point, not at each call site."""
+    result = core.parse_about_md(ABOUT_MD_NON_STRING_TAG)
+    assert result["tags"] == ["OCR", "rapidocr", "vision", "2026"]
+    assert all(isinstance(t, str) for t in result["tags"])
+
+
+def test_embed_text_does_not_crash_on_previously_non_string_tag():
+    about = {"title": "T", "description": "D", "tags": ["a", "2026"]}
+    assert core._embed_text(about) == "T\nD\na, 2026"
 
 
 def test_resolve_project_path_accepts_path_inside_user_root(tmp_path):
