@@ -710,7 +710,8 @@
       "Bash(scp hermes-harness/scan-pdf-vision-ocr/scripts/ocr_one_subprocess.py hermes-vps:__TRACKED_VAR__/scripts/ocr_one_subprocess.py)",
       "Bash(grep -n \"ocr-and-documents\\\\`\" /home/deploy/hermes-cn-ru/hermes-harness/MAIN.md)",
       "Bash(grep -n \"scan-pdf-vision-ocr\\\\`\" /home/deploy/hermes-cn-ru/hermes-harness/MAIN.md)",
-      "Bash(bash scripts/snapshot.sh \"решение: OCR-скилл под реальные 4 vCPU, потоки rapidocr 1→4 \\(D-035\\)\")"
+      "Bash(bash scripts/snapshot.sh \"решение: OCR-скилл под реальные 4 vCPU, потоки rapidocr 1→4 \\(D-035\\)\")",
+      "Bash(bash scripts/snapshot.sh \"D-035 доп: живой прогон подтвердил фикс, починен питфол с путём скилла в песочнице \\(v1.14.1\\)\")"
     ],
     "additionalDirectories": [
       "/home/deploy/hermes-cn-ru/.claude/worktrees/web-project-workspace/.superpowers/sdd/2026-07-27-web-project-workspace",

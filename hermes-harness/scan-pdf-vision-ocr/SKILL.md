@@ -3,7 +3,7 @@ name: scan-pdf-vision-ocr
 description: "Use when a PDF is image-only (no text layer) and you need to read it, extract tasks/questions/figures, or assemble an md file. Renders pages with PyMuPDF, OCRs text with rapidocr-onnxruntime, uses vision_analyze for figures/graphs and pages rapidocr can't read, crops figures via PIL."
 tags: ["PDF", "OCR", "vision", "scans", "textbook", "images", "markdown"]
 related_skills: ["ocr-and-documents", "pdf", "vision_analyze"]
-version: 1.14.0
+version: 1.14.1
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -89,6 +89,21 @@ metadata:
 > instead of just followed — see the full pattern under "execute_code
 > script-execution pattern" in Pitfalls, and Step 1 below for the
 > already-correct version of the detection snippet.
+
+> **Skill files live at `/root/.hermes/skills/...` inside this sandbox —
+> NOT `/home/hermes/.hermes/skills/...` (live mistake, 2026-08-07).**
+> `/home/hermes/...` is the *host* path (where `hermes-web`/the dashboard
+> see it, and where `write_file`'s workspace root lives) — it does not
+> exist inside the Docker sandbox at all. Inside the container `HOME=/root`
+> (D-020) and skills are read-only bind-mounted at
+> `/root/.hermes/skills/<category>/<skill-name>/`. A live run tried
+> `ls /home/hermes/.hermes/skills/productivity/scan-pdf-vision-ocr/scripts/`
+> before calling `ocr_page.py`, got `No such file or directory`, and wasted
+> a turn — don't guess this path by analogy with `/workspace`/the write-safe
+> root, it's a different mount with a different prefix. The correct
+> absolute path is already in the Usage example below
+> (`/root/.hermes/skills/productivity/scan-pdf-vision-ocr/scripts/ocr_page.py`)
+> — copy it from there, don't reconstruct it from memory.
 
 Read image-only (scanned) PDFs by rendering pages to PNG with PyMuPDF and
 letting `vision_analyze` do the OCR. The pattern is meant for **assembling
@@ -593,6 +608,7 @@ Embed the cropped PNGs with relative `./` paths so the md is portable.
 
 ## Pitfalls
 
+- **Don't guess the skill's path inside the sandbox — it's `/root/.hermes/skills/...`, not `/home/hermes/.hermes/skills/...` (verified 2026-08-07, live run).** `/home/hermes/...` is the **host** path — where `hermes-web`, the dashboard, and this repo's deploy scripts see the skill from *outside* the sandbox. Inside the Docker container that actually runs your commands, `HOME=/root` (D-020) and skills are read-only bind-mounted at `/root/.hermes/skills/<category>/<skill-name>/`. A live OCR run reached for `ls /home/hermes/.hermes/skills/productivity/scan-pdf-vision-ocr/scripts/` (reasoning by analogy with `/home/hermes/workspace`, a *different* mount with a *different* prefix) and got `No such file or directory`, burning a turn before it found the right path. The correct absolute path is in the Usage snippet under "Use `scripts/ocr_page.py`, not an inline `RapidOCR()` call" above — copy it from there rather than reconstructing it from memory or by analogy with the workspace path.
 - **`vision_analyze` may return 400 Bad Request on a rendered page.**
   Observed in a 3-page scan (product instruction manual, Spanish text,
   color figures) on 2026-08-05: the call succeeded at the network layer
